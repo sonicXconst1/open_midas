@@ -1,6 +1,6 @@
 pub struct BestPriceMarketTrader {
-    pair: agnostic::trading_pair::TradingPair,
-    amount: f64,
+    pub pair: agnostic::trading_pair::TradingPair,
+    pub amount: f64,
 }
 
 impl BestPriceMarketTrader {
