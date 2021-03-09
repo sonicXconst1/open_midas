@@ -1,5 +1,6 @@
 use std::io::Write;
 use std::io::Read;
+use std::io::Seek;
 use agnostic::trading_pair;
 use agnostic::order;
 
@@ -8,16 +9,15 @@ pub struct Bookkeeper {
 }
 
 impl Bookkeeper {
-    const DEAFULT_TRADES_PATH: &'static str = "bookkeeper/trades.csv";
+    const DEAFULT_TRADES_PATH: &'static str = "trades.csv";
     const SPLITTER: char = '|';
 
     pub fn new() -> std::io::Result<Bookkeeper> {
-        let trades_path = std::path::Path::new(Self::DEAFULT_TRADES_PATH);
-        let trades = if trades_path.exists() {
-            std::fs::File::open(trades_path)?
-        } else {
-            std::fs::File::create(trades_path)?
-        };
+        let trades = std::fs::OpenOptions::new()
+            .write(true)
+            .read(true)
+            .create(true)
+            .open(Self::DEAFULT_TRADES_PATH)?;
         Ok(Bookkeeper {
             trades,
         })
@@ -27,19 +27,27 @@ impl Bookkeeper {
         let order: Order = order.into();
         let mut order = serde_json::to_string(&order).expect("Serialization error");
         order.push(Self::SPLITTER);
+        self.trades.seek(std::io::SeekFrom::End(0)).expect("Failed to seek to end");
         self.trades.write_all(order.as_bytes()).expect("Failed to commit order");
     }
 
     pub fn get_all_trades(&mut self) -> Vec<Order> {
-        let mut result = Vec::with_capacity(100);
-        self.trades.read_to_end(&mut result).expect("Failed to read trades.");
-        String::from_utf8(result)
-            .expect("Invlaid UTF-8 string.")
+        let mut result = String::with_capacity(100);
+        self.trades.seek(std::io::SeekFrom::Start(0)).expect("Failed to seek to start");
+        self.trades.read_to_string(&mut result).expect("Failed to read trades.");
+        result
             .split(Self::SPLITTER)
-            .map(|order_json| serde_json::from_str::<Order>(&order_json)
-                 .expect("Deserialization error")
-                 .into())
+            .filter_map(|order_json| {
+                match serde_json::from_str::<Order>(&order_json) {
+                    Ok(order) => Some(order.into()),
+                    Err(_error) => None,
+                }
+            })
             .collect()
+    }
+
+    pub fn clear_trades(&mut self) {
+        self.trades.set_len(0).unwrap();
     }
 }
 
@@ -108,5 +116,33 @@ impl From<Order> for order::Order {
             price: order.price,
             amount: order.amount,
         }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test() {
+        let order = agnostic::order::Order {
+            trading_pair: agnostic::trading_pair::TradingPair {
+                coins: agnostic::trading_pair::Coins::TonUsdt,
+                side: agnostic::trading_pair::Side::Sell,
+                target: agnostic::trading_pair::Target::Market,
+            },
+            price: 33f64,
+            amount: 100f64,
+        };
+        let mut bookkeeper = Bookkeeper::new().expect("Failed to create bookkeeper");
+        bookkeeper.clear_trades();
+        let orders = bookkeeper.get_all_trades();
+        assert_eq!(orders.len(), 0, "Invalid length");
+        bookkeeper.commit_trade(&order);
+        let orders = bookkeeper.get_all_trades();
+        assert_eq!(orders.len(), 1, "Invalid length");
+        bookkeeper.commit_trade(&order);
+        let orders = bookkeeper.get_all_trades();
+        assert_eq!(orders.len(), 2, "Invalid length");
     }
 }
