@@ -51,7 +51,7 @@ impl Bookkeeper {
     }
 }
 
-#[derive(serde::Serialize, serde::Deserialize, Debug)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
 pub struct Order {
     pub coins: Coins,
     pub side: Side,
@@ -60,18 +60,18 @@ pub struct Order {
     pub amount: f64,
 }
 
-#[derive(serde::Serialize, serde::Deserialize, Debug)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
 pub enum Coins {
     TonUsdt,
 }
 
-#[derive(serde::Serialize, serde::Deserialize, Debug)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
 pub enum Side {
     Buy,
     Sell,
 }
 
-#[derive(serde::Serialize, serde::Deserialize, Debug)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
 pub enum Target {
     Market,
     Limit,
@@ -97,8 +97,8 @@ impl From<&order::Order> for Order {
     }
 }
 
-impl From<Order> for order::Order {
-    fn from(order: Order) -> order::Order {
+impl From<&Order> for order::Order {
+    fn from(order: &Order) -> order::Order {
         order::Order {
             trading_pair: trading_pair::TradingPair {
                 coins: match order.coins {
