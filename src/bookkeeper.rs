@@ -1,8 +1,8 @@
-use std::io::Write;
+use agnostic::order;
+use agnostic::trading_pair;
 use std::io::Read;
 use std::io::Seek;
-use agnostic::trading_pair;
-use agnostic::order;
+use std::io::Write;
 
 pub struct Bookkeeper {
     trades: std::fs::File,
@@ -18,44 +18,91 @@ impl Bookkeeper {
         let filename = format!(
             "{}_{}-{}-{}_{}-{}-{}.{}",
             Self::DEAFULT_TRADES_PATH,
-            time.year(), time.month(), time.day(), time.hour(), time.minute(), time.second(),
-            Self::DEFAULT_EXTENSION);
+            time.year(),
+            time.month(),
+            time.day(),
+            time.hour(),
+            time.minute(),
+            time.second(),
+            Self::DEFAULT_EXTENSION
+        );
         println!("{}", filename);
         let trades = std::fs::OpenOptions::new()
             .write(true)
             .read(true)
             .create(true)
             .open(&filename)?;
-        Ok(Bookkeeper {
-            trades,
-        })
+        Ok(Bookkeeper { trades })
     }
 
     pub fn commit_trade(&mut self, order: &order::Order) {
         let order: Order = order.into();
         let mut order = serde_json::to_string(&order).expect("Serialization error");
         order.push(Self::SPLITTER);
-        self.trades.seek(std::io::SeekFrom::End(0)).expect("Failed to seek to end");
-        self.trades.write_all(order.as_bytes()).expect("Failed to commit order");
+        self.trades
+            .seek(std::io::SeekFrom::End(0))
+            .expect("Failed to seek to end");
+        self.trades
+            .write_all(order.as_bytes())
+            .expect("Failed to commit order");
     }
 
     pub fn get_all_trades(&mut self) -> Vec<Order> {
         let mut result = String::with_capacity(100);
-        self.trades.seek(std::io::SeekFrom::Start(0)).expect("Failed to seek to start");
-        self.trades.read_to_string(&mut result).expect("Failed to read trades.");
+        self.trades
+            .seek(std::io::SeekFrom::Start(0))
+            .expect("Failed to seek to start");
+        self.trades
+            .read_to_string(&mut result)
+            .expect("Failed to read trades.");
         result
             .split(Self::SPLITTER)
-            .filter_map(|order_json| {
-                match serde_json::from_str::<Order>(&order_json) {
+            .filter_map(
+                |order_json| match serde_json::from_str::<Order>(&order_json) {
                     Ok(order) => Some(order.into()),
                     Err(_error) => None,
-                }
-            })
+                },
+            )
             .collect()
+    }
+
+    pub fn get_trades_result(&mut self) -> TradingResult {
+        self.get_all_trades().into()
     }
 
     pub fn clear_trades(&mut self) {
         self.trades.set_len(0).unwrap();
+    }
+}
+
+#[derive(Debug)]
+pub struct TradingResult {
+    sold: f64,
+    bought: f64,
+}
+
+impl TradingResult {
+    pub fn aggregate(trades: Vec<Order>) -> TradingResult {
+        let (sold, bought) =
+            trades
+                .into_iter()
+                .fold((0f64, 0f64), |acc, order| match order.side {
+                    Side::Buy => (acc.0, acc.1 + order.amount),
+                    Side::Sell => (acc.0 + order.amount, acc.1),
+                });
+        TradingResult { sold, bought }
+    }
+}
+
+impl std::fmt::Display for TradingResult {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "Sold: {} | Bought: {} | Profit: {}",
+            self.sold,
+            self.bought,
+            self.bought - self.sold
+        )
     }
 }
 
