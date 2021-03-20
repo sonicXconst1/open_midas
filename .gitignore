@@ -1,3 +1,4 @@
 /target
 Cargo.lock
 trades.csv
+*.agnostic

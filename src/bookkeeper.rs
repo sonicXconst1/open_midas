@@ -9,15 +9,23 @@ pub struct Bookkeeper {
 }
 
 impl Bookkeeper {
-    const DEAFULT_TRADES_PATH: &'static str = "trades.csv";
+    const DEAFULT_TRADES_PATH: &'static str = "trades";
+    const DEFAULT_EXTENSION: &'static str = "agnostic";
     const SPLITTER: char = '|';
 
     pub fn new() -> std::io::Result<Bookkeeper> {
+        let time = time::OffsetDateTime::now_utc();
+        let filename = format!(
+            "{}_{}-{}-{}_{}-{}-{}.{}",
+            Self::DEAFULT_TRADES_PATH,
+            time.year(), time.month(), time.day(), time.hour(), time.minute(), time.second(),
+            Self::DEFAULT_EXTENSION);
+        println!("{}", filename);
         let trades = std::fs::OpenOptions::new()
             .write(true)
             .read(true)
             .create(true)
-            .open(Self::DEAFULT_TRADES_PATH)?;
+            .open(&filename)?;
         Ok(Bookkeeper {
             trades,
         })
