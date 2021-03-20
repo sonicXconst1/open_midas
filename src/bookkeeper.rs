@@ -1,4 +1,6 @@
-use agnostic::order;
+use agnostic::trade;
+use agnostic::trade::TradeResult;
+use agnostic::order::OrderWithId;
 use agnostic::trading_pair;
 use std::io::Read;
 use std::io::Seek;
@@ -35,19 +37,19 @@ impl Bookkeeper {
         Ok(Bookkeeper { trades })
     }
 
-    pub fn commit_trade(&mut self, order: &order::Order) {
-        let order: Order = order.into();
-        let mut order = serde_json::to_string(&order).expect("Serialization error");
-        order.push(Self::SPLITTER);
+    pub fn commit_trade(&mut self, trade: trade::Trade) {
+        let trade: Trade = trade.into();
+        let mut trade = serde_json::to_string(&trade).expect("Serialization error");
+        trade.push(Self::SPLITTER);
         self.trades
             .seek(std::io::SeekFrom::End(0))
             .expect("Failed to seek to end");
         self.trades
-            .write_all(order.as_bytes())
+            .write_all(trade.as_bytes())
             .expect("Failed to commit order");
     }
 
-    pub fn get_all_trades(&mut self) -> Vec<Order> {
+    pub fn get_all_trades(&mut self) -> Vec<Trade> {
         let mut result = String::with_capacity(100);
         self.trades
             .seek(std::io::SeekFrom::Start(0))
@@ -58,8 +60,8 @@ impl Bookkeeper {
         result
             .split(Self::SPLITTER)
             .filter_map(
-                |order_json| match serde_json::from_str::<Order>(&order_json) {
-                    Ok(order) => Some(order.into()),
+                |trade_json| match serde_json::from_str::<Trade>(&trade_json) {
+                    Ok(trade) => Some(trade),
                     Err(_error) => None,
                 },
             )
@@ -82,7 +84,7 @@ pub struct TradingResult {
 }
 
 impl TradingResult {
-    pub fn aggregate(trades: Vec<Order>) -> TradingResult {
+    pub fn aggregate(trades: Vec<Trade>) -> TradingResult {
         let (sold, bought) =
             trades
                 .into_iter()
@@ -107,7 +109,8 @@ impl std::fmt::Display for TradingResult {
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
-pub struct Order {
+pub struct Trade {
+    pub id: String,
     pub coins: Coins,
     pub side: Side,
     pub target: Target,
@@ -120,10 +123,44 @@ pub enum Coins {
     TonUsdt,
 }
 
+impl From<trading_pair::Coins> for Coins {
+    fn from(coins: trading_pair::Coins) -> Self {
+        match coins {
+            trading_pair::Coins::TonUsdt => Coins::TonUsdt,
+        }
+    }
+}
+
+impl From<Coins> for trading_pair::Coins {
+    fn from(coins: Coins) -> Self {
+        match coins {
+            Coins::TonUsdt => trading_pair::Coins::TonUsdt,
+        }
+    }
+}
+
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
 pub enum Side {
     Buy,
     Sell,
+}
+
+impl From<trading_pair::Side> for Side {
+    fn from(side: trading_pair::Side) -> Self {
+        match side {
+            trading_pair::Side::Sell => Side::Sell,
+            trading_pair::Side::Buy => Side::Buy,
+        }
+    }
+}
+
+impl From<Side> for trading_pair::Side {
+    fn from(side: Side) -> Self {
+        match side {
+            Side::Sell => trading_pair::Side::Sell,
+            Side::Buy => trading_pair::Side::Buy,
+        }
+    }
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
@@ -132,44 +169,65 @@ pub enum Target {
     Limit,
 }
 
-impl From<&order::Order> for Order {
-    fn from(order: &order::Order) -> Order {
-        Order {
-            coins: match order.trading_pair.coins {
-                trading_pair::Coins::TonUsdt => Coins::TonUsdt,
-            },
-            side: match order.trading_pair.side {
-                trading_pair::Side::Buy => Side::Buy,
-                trading_pair::Side::Sell => Side::Sell,
-            },
-            target: match order.trading_pair.target {
-                trading_pair::Target::Market => Target::Market,
-                trading_pair::Target::Limit => Target::Limit,
-            },
-            price: order.price,
-            amount: order.amount,
+impl From<trade::Trade> for Trade {
+    fn from(trade: trade::Trade) -> Trade {
+        let (id, coins, side, target, price, amount) = match trade {
+            trade::Trade::Market(result) => (
+                result.id,
+                result.trading_pair.coins,
+                result.trading_pair.side, 
+                Target::Market,
+                result.price,
+                result.amount
+            ),
+            trade::Trade::Limit(order) => (
+                order.id,
+                order.trading_pair.coins,
+                order.trading_pair.side,
+                Target::Limit,
+                order.price,
+                order.amount,
+            ),
+        };
+        Trade {
+            id, 
+            coins: coins.into(),
+            side: side.into(),
+            target,
+            price,
+            amount,
         }
     }
 }
 
-impl From<&Order> for order::Order {
-    fn from(order: &Order) -> order::Order {
-        order::Order {
-            trading_pair: trading_pair::TradingPair {
-                coins: match order.coins {
-                    Coins::TonUsdt => trading_pair::Coins::TonUsdt,
+impl From<Trade> for trade::Trade {
+    fn from(trade: Trade) -> trade::Trade {
+        let id = trade.id;
+        let coins = trade.coins.into();
+        let side = trade.side.into();
+        let amount = trade.amount;
+        let price = trade.price;
+        match trade.target {
+            Target::Market => trade::Trade::Market(TradeResult {
+                id,
+                trading_pair: trading_pair::TradingPair {
+                    coins,
+                    side,
+                    target: trading_pair::Target::Market,
                 },
-                side: match order.side {
-                    Side::Sell => trading_pair::Side::Sell,
-                    Side::Buy => trading_pair::Side::Buy,
+                price,
+                amount,
+            }),
+            Target::Limit => trade::Trade::Limit(OrderWithId {
+                id,
+                trading_pair: trading_pair::TradingPair {
+                    coins,
+                    side,
+                    target: trading_pair::Target::Limit,
                 },
-                target: match order.target {
-                    Target::Market => trading_pair::Target::Market,
-                    Target::Limit => trading_pair::Target::Limit,
-                },
-            },
-            price: order.price,
-            amount: order.amount,
+                price,
+                amount,
+            }),
         }
     }
 }
@@ -180,7 +238,8 @@ mod test {
 
     #[test]
     fn test() {
-        let order = agnostic::order::Order {
+        let trade = agnostic::trade::Trade::Market(agnostic::trade::TradeResult {
+            id: "1337".to_owned(),
             trading_pair: agnostic::trading_pair::TradingPair {
                 coins: agnostic::trading_pair::Coins::TonUsdt,
                 side: agnostic::trading_pair::Side::Sell,
@@ -188,15 +247,15 @@ mod test {
             },
             price: 33f64,
             amount: 100f64,
-        };
+        });
         let mut bookkeeper = Bookkeeper::new().expect("Failed to create bookkeeper");
         bookkeeper.clear_trades();
         let orders = bookkeeper.get_all_trades();
         assert_eq!(orders.len(), 0, "Invalid length");
-        bookkeeper.commit_trade(&order);
+        bookkeeper.commit_trade(trade.clone());
         let orders = bookkeeper.get_all_trades();
         assert_eq!(orders.len(), 1, "Invalid length");
-        bookkeeper.commit_trade(&order);
+        bookkeeper.commit_trade(trade);
         let orders = bookkeeper.get_all_trades();
         assert_eq!(orders.len(), 2, "Invalid length");
     }
