@@ -28,7 +28,26 @@ impl Bookkeeper {
             time.second(),
             Self::DEFAULT_EXTENSION
         );
-        println!("{}", filename);
+        Self::open(std::path::PathBuf::from(filename))
+    }
+
+    pub fn local() -> Option<std::io::Result<Bookkeeper>> {
+        if let Ok(entries) = std::fs::read_dir(".") {
+            for entry in entries {
+                let entry = entry.unwrap();
+                if let Some(extension) = entry.path().extension().map_or(None, |extension| Some(extension.to_owned())) {
+                    if extension == Self::DEFAULT_EXTENSION {
+                        return Some(Self::open(entry.path()));
+                    }
+                }
+            }
+            None
+        } else {
+            None
+        }
+    }
+
+    fn open(filename: std::path::PathBuf) -> std::io::Result<Bookkeeper> {
         let trades = std::fs::OpenOptions::new()
             .write(true)
             .read(true)
