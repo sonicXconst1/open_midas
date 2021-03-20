@@ -67,7 +67,7 @@ impl Bookkeeper {
     }
 
     pub fn get_trades_result(&mut self) -> TradingResult {
-        self.get_all_trades().into()
+        TradingResult::aggregate(self.get_all_trades())
     }
 
     pub fn clear_trades(&mut self) {
