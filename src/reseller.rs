@@ -4,6 +4,7 @@ use agnostic::merchant::Merchant;
 use agnostic::trading_pair::{Side, Target};
 use agnostic::trading_pair::{Coins, TradingPair};
 use std::collections::HashMap;
+use crate::calculators::{AmountCalculator, ProfitCalculator};
 use std::sync::Arc;
 
 pub type Price = f64;
@@ -22,7 +23,6 @@ impl Entry {
 }
 
 pub struct Reseller {
-    // It's better to use HashSet<Coins, Vec<Entry>>
     market_buy_storage: Storage,
     market_sell_storage: Storage,
     merchant: Arc<dyn Merchant>,
@@ -75,7 +75,9 @@ impl Reseller {
                 trading_pair.side,
                 &the_best_order.price.into(),
                 currency.amount);
-            // amount calculator requrired here to find a way to get valid amount.
+            let amount_calculator = AmountCalculator::new(0.1, 0.01)
+                .expect("Invalid fee");
+            //let amount = amount_calculator.calculate(
         }
         // process sell side first
         unimplemented!()
