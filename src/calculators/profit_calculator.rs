@@ -9,15 +9,18 @@ impl ProfitCalculator {
         &self,
         direct_order: &Order,
         reversed_order: &Order,
-    ) -> f64 {
+    ) -> Option<f64> {
         let direct = direct_order.price;
         let reversed = reversed_order.price;
-        let percent = if direct < reversed {
-            direct / reversed
+        self.evaluate(direct, reversed)
+    }
+
+    pub fn evaluate(&self, sell_price: f64, buy_price: f64) -> Option<f64> {
+        if sell_price >= buy_price {
+            Some(1.0 - buy_price / sell_price)
         } else {
-            reversed / direct
-        };
-        1.0 - percent
+            None
+        }
     }
 }
 
@@ -47,14 +50,14 @@ mod test {
         };
         let calculator = ProfitCalculator::default();
         let amount = calculator.calculate(&direct_order, &revesed_order);
-        assert_eq!(amount, 0.0);
+        assert_eq!(amount, Some(0.0));
         revesed_order.price = 2f64;
         let amount = calculator.calculate(&direct_order, &revesed_order);
-        assert_eq!(amount, 0.5);
+        assert_eq!(amount, None);
         revesed_order.price = 1f64;
         direct_order.price = 2f64;
         let amount = calculator.calculate(&direct_order, &revesed_order);
-        assert_eq!(amount, 0.5);
+        assert_eq!(amount, Some(0.5));
         direct_order.price = 1f64;
     }
 }

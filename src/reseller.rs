@@ -71,8 +71,13 @@ impl Reseller {
                     trading_pair,
                     orders)),
             };
+            let profit_calculator = ProfitCalculator::default();
             let the_best_entry = match entries.iter()
-                .find(|entry| entry.price > the_best_order.price) {
+                .find(|entry| {
+                    profit_calculator
+                        .evaluate(entry.price, the_best_order.price)
+                        .map_or(false, |profit| profit >= 0.01)
+                }) {
                 Some(entry) => entry,
                 None => return Err("Failed to find entry with good price".to_owned()),
             };
