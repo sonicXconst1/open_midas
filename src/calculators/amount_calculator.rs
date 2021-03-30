@@ -81,7 +81,7 @@ impl AmountCalculator {
         }
     }
 
-    pub fn calculate_from_one_order(
+    pub fn evaluate(
         &self,
         order_amount: f64,
         balance: Balance,
@@ -198,9 +198,9 @@ mod test {
     }
 
     #[test]
-    fn one_order_test() {
+    fn evaluate() {
         let calculator = AmountCalculator::new(0.1, 0.1).unwrap();
-        let amount = calculator.calculate_from_one_order(
+        let amount = calculator.evaluate(
             100.0,
             Balance {
                 amount: 100.0,
