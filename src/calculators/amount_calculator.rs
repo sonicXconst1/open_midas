@@ -12,10 +12,19 @@ pub enum Amount {
     BalanceBased(f64),
 }
 
+impl Amount {
+    pub fn value(&self) -> f64 {
+        match self {
+            Amount::PriceBased(value) => *value,
+            Amount::BalanceBased(value) => *value,
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct Balance {
-    amount: f64,
-    fee: f64,
+    pub amount: f64,
+    pub fee: f64,
 }
 
 impl Balance {

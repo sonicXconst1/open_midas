@@ -1,10 +1,11 @@
 use agnostic::trade::{TradeResult, Trade};
-use agnostic::order::OrderWithId;
+use agnostic::order::{OrderWithId, Order};
 use agnostic::merchant::Merchant;
 use agnostic::trading_pair::{Side, Target};
 use agnostic::trading_pair::{Coins, TradingPair};
 use std::collections::HashMap;
 use crate::calculators::{AmountCalculator, ProfitCalculator};
+use crate::calculators::amount_calculator::Balance;
 use std::sync::Arc;
 
 pub type Price = f64;
@@ -54,7 +55,7 @@ impl Reseller {
     pub async fn iterate(&mut self) -> Result<Trade, String> {
         let accountant = self.merchant.accountant();
         let sniffer = self.merchant.sniffer();
-        let trade = self.merchant.trader();
+        let trader = self.merchant.trader();
         for (coins, entries) in self.market_sell_storage.iter_mut() {
             let trading_pair = TradingPair {
                 coins: coins.clone(),
@@ -70,6 +71,11 @@ impl Reseller {
                     trading_pair,
                     orders)),
             };
+            let the_best_entry = match entries.iter()
+                .find(|entry| entry.price > the_best_order.price) {
+                Some(entry) => entry,
+                None => return Err("Failed to find entry with good price".to_owned()),
+            };
             let currency_to_spend = agnostic::price::convert_to_base_coin_amount(
                 trading_pair.target,
                 trading_pair.side,
@@ -77,7 +83,27 @@ impl Reseller {
                 currency.amount);
             let amount_calculator = AmountCalculator::new(0.1, 0.01)
                 .expect("Invalid fee");
-            //let amount = amount_calculator.calculate(
+            let amount = match amount_calculator.calculate_from_one_order(
+                the_best_order.amount.min(the_best_entry.amount),
+                Balance {
+                    amount: currency_to_spend,
+                    fee: amount_calculator.fee,
+                }) {
+                Some(amount) => amount.value(),
+                None => return Err("Failed to calculate amount".to_owned()),
+            };
+            match trader.create_order(Order {
+                trading_pair: TradingPair {
+                    coins: coins.clone(),
+                    side: Side::Buy,
+                    target: Target::Market,
+                },
+                price: the_best_order.price,
+                amount,
+            }).await {
+                Ok(trade) => return Ok(trade),
+                Err(_) => (),
+            }
         }
         // process sell side first
         unimplemented!()
