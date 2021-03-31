@@ -3,3 +3,4 @@ pub mod bookkeeper;
 pub mod reseller;
 pub mod calculators;
 pub mod filters;
+pub mod merchant_manager;
