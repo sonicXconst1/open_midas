@@ -25,10 +25,12 @@ impl Entry {
 }
 
 pub struct Reseller {
+    merchant: Arc<dyn Merchant>,
     market_buy_storage: Storage,
     market_sell_storage: Storage,
-    merchant: Arc<dyn Merchant>,
     low_amount_filter: LowAmountFilter,
+    amount_calculator: AmountCalculator,
+    min_profit: f64,
 }
 
 impl Reseller {
@@ -66,6 +68,9 @@ impl Reseller {
             Side::Buy => &mut self.market_buy_storage,
             Side::Sell => &mut self.market_sell_storage,
         };
+        let min_profit = self.min_profit;
+        let amount_calculator = self.amount_calculator;
+        let profit_calculator = ProfitCalculator::default();
         for (coins, entries) in storage.iter_mut() {
             let trading_pair = TradingPair {
                 coins: coins.clone(),
@@ -85,7 +90,6 @@ impl Reseller {
                     ))
                 }
             };
-            let profit_calculator = ProfitCalculator::default();
             let the_best_entry = match entries.iter().find(|entry| {
                 let (sell_price, buy_price) = match market_storage_side {
                     Side::Buy => (the_best_order.price, entry.price),
@@ -93,7 +97,7 @@ impl Reseller {
                 };
                 profit_calculator
                     .evaluate(sell_price, buy_price)
-                    .map_or(false, |profit| profit >= 0.03)
+                    .map_or(false, |profit| profit >= min_profit)
             }) {
                 Some(entry) => entry,
                 None => return Err("Failed to find entry with good price".to_owned()),
@@ -104,7 +108,6 @@ impl Reseller {
                 &the_best_order.price.into(),
                 currency.amount,
             );
-            let amount_calculator = AmountCalculator::new(0.1, 0.01).expect("Invalid fee");
             let amount = match amount_calculator.evaluate(
                 the_best_order.amount.min(the_best_entry.amount),
                 Balance {

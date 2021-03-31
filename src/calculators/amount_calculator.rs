@@ -1,6 +1,6 @@
 use agnostic::order::Order;
 
-#[derive(Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct AmountCalculator {
     pub min_amount_threshold: f64,
     pub fee: f64,
