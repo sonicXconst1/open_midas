@@ -25,7 +25,7 @@ impl Entry {
 }
 
 pub struct Reseller {
-    merchant: Arc<dyn Merchant>,
+    merchants: Vec<Arc<dyn Merchant>>,
     market_buy_storage: Storage,
     market_sell_storage: Storage,
     low_amount_filter: LowAmountFilter,
@@ -35,13 +35,13 @@ pub struct Reseller {
 
 impl Reseller {
     pub fn new(
-        merchant: Arc<dyn Merchant>,
+        merchants: Vec<Arc<dyn Merchant>>,
         low_amount_filter: LowAmountFilter,
         amount_calculator: AmountCalculator,
         min_profit: f64,
     ) -> Reseller {
         Reseller {
-            merchant,
+            merchants,
             low_amount_filter,
             amount_calculator,
             market_buy_storage: Storage::new(),
@@ -67,19 +67,26 @@ impl Reseller {
     }
 
     pub async fn iterate(&mut self) -> Result<Trade, String> {
-        match self.iterate_market(Side::Buy).await? {
-            Some(trade) => Ok(trade),
-            None => match self.iterate_market(Side::Sell).await? {
-                Some(trade) => Ok(trade),
-                None => Err("No good orders to trade.".to_owned()),
-            },
+        for merchant_index in 0..self.merchants.len() {
+            let merchant = self.merchants.get(merchant_index).unwrap().clone();
+            match self.iterate_market(merchant.clone(), Side::Buy).await? {
+                Some(trade) => return Ok(trade),
+                None => match self.iterate_market(merchant.clone(), Side::Sell).await? {
+                    Some(trade) => return Ok(trade),
+                    None => (),
+                },
+            }
         }
+        Err("No good orders to trade.".to_owned())
     }
 
-    async fn iterate_market(&mut self, market_storage_side: Side) -> Result<Option<Trade>, String> {
-        let accountant = self.merchant.accountant();
-        let sniffer = self.merchant.sniffer();
-        let trader = self.merchant.trader();
+    async fn iterate_market(
+        &mut self,
+        merchant: Arc<dyn Merchant>,
+        market_storage_side: Side) -> Result<Option<Trade>, String> {
+        let accountant = merchant.accountant();
+        let sniffer = merchant.sniffer();
+        let trader = merchant.trader();
         let storage = match market_storage_side {
             Side::Buy => &mut self.market_buy_storage,
             Side::Sell => &mut self.market_sell_storage,
@@ -181,15 +188,16 @@ fn accept_new_item(storage: &mut Storage, coins: &Coins, new_price: Price, new_a
 mod test {
     use super::*;
     use tokio_test::block_on;
+    use agnostic::merchant;
     use agnostic_test::merchant::Merchant;
     use crate::filters::LowAmountFilter;
     use crate::calculators::AmountCalculator;
     use agnostic::trade::{Trade, TradeResult};
     use agnostic::trading_pair::{TradingPair, Coins};
 
-    fn default_reseller(merchant: Arc<Merchant>) -> Reseller {
+    fn default_reseller(merchants: Vec<Arc<dyn merchant::Merchant>>) -> Reseller {
         Reseller::new(
-            merchant,
+            merchants,
             LowAmountFilter {
                 low_amount: 0.1,
             },
@@ -203,7 +211,7 @@ mod test {
 
     #[test]
     fn reseller_no_data_iteration() {
-        let mut reseller = default_reseller(Arc::new(Merchant::default()));
+        let mut reseller = default_reseller(vec![Arc::new(Merchant::default())]);
         let result = block_on(reseller.iterate());
         assert!(result.is_err())
     }
@@ -211,7 +219,7 @@ mod test {
     #[test]
     fn reseller_simple_case() {
         let merchant = Arc::new(Merchant::with_orders(100f64, 100f64));
-        let mut reseller = default_reseller(merchant);
+        let mut reseller = default_reseller(vec![merchant]);
         let id = 1.to_string();
         let price = 10f64;
         let amount = 1000f64;
