@@ -34,6 +34,22 @@ pub struct Reseller {
 }
 
 impl Reseller {
+    pub fn new(
+        merchant: Arc<dyn Merchant>,
+        low_amount_filter: LowAmountFilter,
+        amount_calculator: AmountCalculator,
+        min_profit: f64,
+    ) -> Reseller {
+        Reseller {
+            merchant,
+            low_amount_filter,
+            amount_calculator,
+            market_buy_storage: Storage::new(),
+            market_sell_storage: Storage::new(),
+            min_profit,
+        }
+    }
+
     pub fn accept_trade(&mut self, trade: Trade) {
         let coins = trade.trading_pair().coins;
         let price = trade.price();
@@ -158,5 +174,70 @@ fn accept_new_item(storage: &mut Storage, coins: &Coins, new_price: Price, new_a
             price: new_price,
             amount: new_amount,
         }),
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use tokio_test::block_on;
+    use agnostic_test::merchant::Merchant;
+    use crate::filters::LowAmountFilter;
+    use crate::calculators::AmountCalculator;
+    use agnostic::trade::{Trade, TradeResult};
+    use agnostic::trading_pair::{TradingPair, Coins};
+
+    fn default_reseller(merchant: Arc<Merchant>) -> Reseller {
+        Reseller::new(
+            merchant,
+            LowAmountFilter {
+                low_amount: 0.1,
+            },
+            AmountCalculator {
+                min_amount_threshold: 0.1,
+                fee: 0.01,
+            },
+            0.1,
+        )
+    }
+
+    #[test]
+    fn reseller_no_data_iteration() {
+        let mut reseller = default_reseller(Arc::new(Merchant::default()));
+        let result = block_on(reseller.iterate());
+        assert!(result.is_err())
+    }
+
+    #[test]
+    fn reseller_simple_case() {
+        let merchant = Arc::new(Merchant::with_orders(100f64, 100f64));
+        let mut reseller = default_reseller(merchant);
+        let id = 1.to_string();
+        let price = 10f64;
+        let amount = 1000f64;
+        let trade = Trade::Market(TradeResult {
+            id: id.clone(),
+            trading_pair: TradingPair {
+                coins: Coins::TonUsdt,
+                side: Side::Buy,
+                target: Target::Market,
+            },
+            price,
+            amount,
+        });
+        reseller.accept_trade(trade);
+        let result = block_on(reseller.iterate());
+        assert_eq!(
+            result,
+            Ok(Trade::Market(TradeResult {
+                id: "1337".to_string(),
+                trading_pair: TradingPair {
+                    coins: Coins::TonUsdt,
+                    side: Side::Sell,
+                    target: Target::Market,
+                },
+                price: 100f64,
+                amount: 100f64,
+            })));
     }
 }
