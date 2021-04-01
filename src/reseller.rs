@@ -90,7 +90,10 @@ impl Reseller {
                     ))
                 }
             };
-            let the_best_entry = match entries.iter().find(|entry| {
+            let (entry_index, the_best_entry) = match entries
+                .iter_mut()
+                .enumerate()
+                .find(|(_index, entry)| {
                 let (sell_price, buy_price) = match market_storage_side {
                     Side::Buy => (the_best_order.price, entry.price),
                     Side::Sell => (entry.price, the_best_order.price),
@@ -126,7 +129,14 @@ impl Reseller {
                 })
                 .await
             {
-                Ok(trade) => return Ok(Some(trade)),
+                Ok(trade) => {
+                    the_best_entry.amount -= trade.amount();
+                    if the_best_entry.amount <= 0.0 {
+                        entries.remove(entry_index);
+                    };
+                    self.accept_trade(trade.clone());
+                    return Ok(Some(trade));
+                },
                 Err(_) => (),
             }
         }
