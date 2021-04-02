@@ -84,7 +84,7 @@ impl AmountCalculator {
     pub fn evaluate(
         &self,
         order_amount: f64,
-        balance: Balance,
+        balance: &Balance,
     ) -> Option<Amount> {
         let balance_with_fee = balance.with_fee();
         if order_amount < balance_with_fee {
@@ -202,7 +202,7 @@ mod test {
         let calculator = AmountCalculator::new(0.1, 0.1).unwrap();
         let amount = calculator.evaluate(
             100.0,
-            Balance {
+            &Balance {
                 amount: 100.0,
                 fee: calculator.fee,
             }

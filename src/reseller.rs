@@ -13,6 +13,7 @@ pub type Price = f64;
 pub type Amount = f64;
 pub type Storage = HashMap<Coins, Vec<Entry>>;
 
+#[derive(Debug)]
 pub struct Entry {
     pub price: Price,
     pub amount: Amount,
@@ -67,103 +68,60 @@ impl Reseller {
     }
 
     pub async fn iterate(&mut self) -> Result<Trade, String> {
-        for merchant_index in 0..self.merchants.len() {
-            let merchant = self.merchants.get(merchant_index).unwrap().clone();
-            match self.iterate_market(merchant.clone(), Side::Buy).await? {
-                Some(trade) => return Ok(trade),
-                None => match self.iterate_market(merchant.clone(), Side::Sell).await? {
-                    Some(trade) => return Ok(trade),
-                    None => (),
-                },
+        let target = Target::Market;
+        for side in &[Side::Sell, Side::Buy] {
+            let storage = match side {
+                Side::Sell => &mut self.market_buy_storage,
+                Side::Buy => &mut self.market_sell_storage,
+            };
+            for (coins, entries) in storage.iter_mut() {
+                let (entry_index, the_best_entry) =
+                    match find_best_entry(&entries, side.clone().reversed()) {
+                        Some(entry) => entry,
+                        None => continue,
+                    };
+                let trading_pair = TradingPair {
+                    coins: coins.clone(),
+                    target: target.clone(),
+                    side: side.clone(),
+                };
+                let (the_best_order, merchant) = find_the_best_order(
+                    the_best_entry,
+                    &self.merchants,
+                    trading_pair,
+                    &self.amount_calculator,
+                    &self.low_amount_filter,
+                )
+                .await?;
+                let profit_calculator = ProfitCalculator::default();
+                let (sell_price, buy_price) = match side.clone() {
+                    Side::Sell => (the_best_order.price, the_best_entry.price),
+                    Side::Buy => (the_best_entry.price, the_best_order.price),
+                };
+                match profit_calculator.evaluate(sell_price, buy_price) {
+                    Some(profit) => {
+                        if profit >= self.min_profit {
+                            let trader = merchant.trader();
+                            match trader.create_order(the_best_order).await {
+                                Ok(trade) => {
+                                    if the_best_entry.amount - trade.amount() <= 0.0 {
+                                        entries.remove(entry_index);
+                                    } else {
+                                        let entry = entries.get_mut(entry_index).unwrap();
+                                        entry.amount -= trade.amount()
+                                    };
+                                    self.accept_trade(trade.clone());
+                                    return Ok(trade);
+                                }
+                                Err(_) => (),
+                            }
+                        }
+                    }
+                    None => continue,
+                }
             }
         }
         Err("No good orders to trade.".to_owned())
-    }
-
-    async fn iterate_market(
-        &mut self,
-        merchant: Arc<dyn Merchant>,
-        market_storage_side: Side) -> Result<Option<Trade>, String> {
-        let accountant = merchant.accountant();
-        let sniffer = merchant.sniffer();
-        let trader = merchant.trader();
-        let storage = match market_storage_side {
-            Side::Buy => &mut self.market_buy_storage,
-            Side::Sell => &mut self.market_sell_storage,
-        };
-        let min_profit = self.min_profit;
-        let amount_calculator = self.amount_calculator;
-        let profit_calculator = ProfitCalculator::default();
-        for (coins, entries) in storage.iter_mut() {
-            let trading_pair = TradingPair {
-                coins: coins.clone(),
-                target: Target::Market,
-                side: market_storage_side.clone(),
-            };
-            let trading_pair = trading_pair.reversed_side();
-            let currency = accountant.ask(trading_pair.coin_to_spend()).await?;
-            let orders = sniffer.all_the_best_orders(trading_pair.clone(), 5).await?;
-            let orders = self.low_amount_filter.filter(orders);
-            let the_best_order = match orders.get(0) {
-                Some(order) => order,
-                None => {
-                    return Err(format!(
-                        "Sniffer failed to sniff orders.\nPair: {:#?}\nOrders: {:#?}",
-                        trading_pair, orders
-                    ))
-                }
-            };
-            let (entry_index, the_best_entry) = match entries
-                .iter_mut()
-                .enumerate()
-                .find(|(_index, entry)| {
-                let (sell_price, buy_price) = match market_storage_side {
-                    Side::Buy => (the_best_order.price, entry.price),
-                    Side::Sell => (entry.price, the_best_order.price),
-                };
-                profit_calculator
-                    .evaluate(sell_price, buy_price)
-                    .map_or(false, |profit| profit >= min_profit)
-            }) {
-                Some(entry) => entry,
-                None => return Err("Failed to find entry with good price".to_owned()),
-            };
-            let currency_to_spend = agnostic::price::convert_to_base_coin_amount(
-                trading_pair.target.clone(),
-                trading_pair.side.clone(),
-                &the_best_order.price.into(),
-                currency.amount,
-            );
-            let amount = match amount_calculator.evaluate(
-                the_best_order.amount.min(the_best_entry.amount),
-                Balance {
-                    amount: currency_to_spend,
-                    fee: amount_calculator.fee,
-                },
-            ) {
-                Some(amount) => amount.value(),
-                None => return Err("Failed to calculate amount".to_owned()),
-            };
-            match trader
-                .create_order(Order {
-                    trading_pair: trading_pair.clone(),
-                    price: the_best_order.price,
-                    amount,
-                })
-                .await
-            {
-                Ok(trade) => {
-                    the_best_entry.amount -= trade.amount();
-                    if the_best_entry.amount <= 0.0 {
-                        entries.remove(entry_index);
-                    };
-                    self.accept_trade(trade.clone());
-                    return Ok(Some(trade));
-                },
-                Err(_) => (),
-            }
-        }
-        Ok(None)
     }
 }
 
@@ -184,23 +142,111 @@ fn accept_new_item(storage: &mut Storage, coins: &Coins, new_price: Price, new_a
     }
 }
 
+fn find_best_entry(entries: &[Entry], side: Side) -> Option<(usize, &Entry)> {
+    match side {
+        Side::Sell => entries
+            .iter()
+            .enumerate()
+            .max_by(|left, right| left.1.price.partial_cmp(&right.1.price).unwrap()),
+        Side::Buy => entries
+            .iter()
+            .enumerate()
+            .min_by(|left, right| left.1.price.partial_cmp(&right.1.price).unwrap()),
+    }
+}
+
+async fn find_the_best_order(
+    entry: &Entry,
+    merchants: &[Arc<dyn Merchant>],
+    pair: TradingPair,
+    amount_calculator: &AmountCalculator,
+    low_amount_filter: &LowAmountFilter,
+) -> Result<(Order, Arc<dyn Merchant>), String> {
+    let mut result = None;
+    let mut the_best_merchant = None;
+    let mut result_error = String::new();
+    for merchant in merchants.iter() {
+        let sniffer = merchant.sniffer();
+        let orders = sniffer.all_the_best_orders(pair.clone(), 15).await?;
+        let orders = low_amount_filter.filter(orders);
+        let the_best_order = match orders.get(0) {
+            Some(order) => order,
+            None => {
+                return Err(format!(
+                    "Sniffer failed to sniff orders.\nPair: {:#?}\nOrders: {:#?}",
+                    pair, orders
+                ))
+            }
+        };
+        let accountant = merchant.accountant();
+        let currency = match accountant.ask(pair.coin_to_spend()).await {
+            Ok(currency) => currency,
+            Err(error) => {
+                result_error.push_str(&error);
+                continue;
+            }
+        };
+        let currency_to_spend = agnostic::price::convert_to_base_coin_amount(
+            pair.target.clone(),
+            pair.side.clone(),
+            &the_best_order.price.into(),
+            currency.amount,
+        );
+        let balance = Balance {
+            amount: currency_to_spend,
+            fee: amount_calculator.fee,
+        };
+        let amount =
+            match amount_calculator.evaluate(the_best_order.amount.min(entry.amount), &balance) {
+                Some(amount) => amount.value(),
+                None => continue,
+            };
+        match (pair.side.clone(), &mut result) {
+            (_, None) => {
+                result = Some(Order {
+                    trading_pair: pair.clone(),
+                    price: the_best_order.price,
+                    amount,
+                });
+                the_best_merchant = Some(merchant.clone());
+            }
+            (Side::Sell, Some(order)) => {
+                if the_best_order.price > order.price {
+                    order.price = the_best_order.price;
+                    order.amount = amount;
+                    the_best_merchant = Some(merchant.clone());
+                }
+            }
+            (Side::Buy, Some(order)) => {
+                if the_best_order.price < order.price {
+                    order.price = the_best_order.price;
+                    order.amount = order.amount;
+                    the_best_merchant = Some(merchant.clone());
+                }
+            }
+        }
+    }
+    match (result, the_best_merchant) {
+        (Some(order), Some(merchant)) => Ok((order, merchant)),
+        _ => Err(format!("Failed to find the best order: {}", result_error)),
+    }
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
-    use tokio_test::block_on;
-    use agnostic::merchant;
-    use agnostic_test::merchant::Merchant;
-    use crate::filters::LowAmountFilter;
     use crate::calculators::AmountCalculator;
+    use crate::filters::LowAmountFilter;
+    use agnostic::merchant;
     use agnostic::trade::{Trade, TradeResult};
-    use agnostic::trading_pair::{TradingPair, Coins};
+    use agnostic::trading_pair::{Coins, TradingPair};
+    use agnostic_test::merchant::Merchant;
+    use tokio_test::block_on;
 
     fn default_reseller(merchants: Vec<Arc<dyn merchant::Merchant>>) -> Reseller {
         Reseller::new(
             merchants,
-            LowAmountFilter {
-                low_amount: 0.1,
-            },
+            LowAmountFilter { low_amount: 0.1 },
             AmountCalculator {
                 min_amount_threshold: 0.1,
                 fee: 0.01,
@@ -218,11 +264,13 @@ mod test {
 
     #[test]
     fn reseller_simple_case() {
-        let merchant = Arc::new(Merchant::with_orders(100f64, 100f64));
-        let mut reseller = default_reseller(vec![merchant]);
+        let mut reseller = default_reseller(vec![
+            Arc::new(Merchant::with_orders(90f64, 100f64)),
+            Arc::new(Merchant::with_orders(120f64, 100f64)),
+        ]);
         let id = 1.to_string();
         let price = 10f64;
-        let amount = 1000f64;
+        let amount = 120f64;
         let trade = Trade::Market(TradeResult {
             id: id.clone(),
             trading_pair: TradingPair {
@@ -244,8 +292,37 @@ mod test {
                     side: Side::Sell,
                     target: Target::Market,
                 },
-                price: 100f64,
+                price: 120f64,
                 amount: 100f64,
-            })));
+            }))
+        );
+        let result = block_on(reseller.iterate());
+        assert_eq!(
+            result,
+            Ok(Trade::Market(TradeResult {
+                id: "1337".to_string(),
+                trading_pair: TradingPair {
+                    coins: Coins::TonUsdt,
+                    side: Side::Sell,
+                    target: Target::Market,
+                },
+                price: 120f64,
+                amount: 20f64,
+            }))
+        );
+        let result = block_on(reseller.iterate());
+        assert_eq!(
+            result,
+            Ok(Trade::Market(TradeResult {
+                id: "1337".to_string(),
+                trading_pair: TradingPair {
+                    coins: Coins::TonUsdt,
+                    side: Side::Buy,
+                    target: Target::Market,
+                },
+                price: 90f64,
+                amount: 9.9f64,
+            }))
+        );
     }
 }
