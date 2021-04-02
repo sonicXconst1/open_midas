@@ -7,7 +7,6 @@ use agnostic::trade::Trade;
 use agnostic::trading_pair::{Coins, TradingPair};
 use agnostic::trading_pair::{Side, Target};
 use std::collections::HashMap;
-use std::sync::Arc;
 
 pub type Price = f64;
 pub type Amount = f64;
@@ -25,8 +24,8 @@ impl Entry {
     }
 }
 
-pub struct Reseller {
-    merchants: Vec<Arc<dyn Merchant>>,
+pub struct Reseller<'a> {
+    merchants: Vec<&'a dyn Merchant>,
     market_buy_storage: Storage,
     market_sell_storage: Storage,
     low_amount_filter: LowAmountFilter,
@@ -34,13 +33,13 @@ pub struct Reseller {
     min_profit: f64,
 }
 
-impl Reseller {
+impl<'a> Reseller<'a> {
     pub fn new(
-        merchants: Vec<Arc<dyn Merchant>>,
+        merchants: Vec<&'a dyn Merchant>,
         low_amount_filter: LowAmountFilter,
         amount_calculator: AmountCalculator,
         min_profit: f64,
-    ) -> Reseller {
+    ) -> Reseller<'a> {
         Reseller {
             merchants,
             low_amount_filter,
@@ -155,13 +154,13 @@ fn find_best_entry(entries: &[Entry], side: Side) -> Option<(usize, &Entry)> {
     }
 }
 
-async fn find_the_best_order(
+async fn find_the_best_order<'a>(
     entry: &Entry,
-    merchants: &[Arc<dyn Merchant>],
+    merchants: &[&'a dyn Merchant],
     pair: TradingPair,
     amount_calculator: &AmountCalculator,
     low_amount_filter: &LowAmountFilter,
-) -> Result<(Order, Arc<dyn Merchant>), String> {
+) -> Result<(Order, &'a dyn Merchant), String> {
     let mut result = None;
     let mut the_best_merchant = None;
     let mut result_error = String::new();
@@ -243,7 +242,7 @@ mod test {
     use agnostic_test::merchant::Merchant;
     use tokio_test::block_on;
 
-    fn default_reseller(merchants: Vec<Arc<dyn merchant::Merchant>>) -> Reseller {
+    fn default_reseller<'a>(merchants: Vec<&'a dyn merchant::Merchant>) -> Reseller<'a> {
         Reseller::new(
             merchants,
             LowAmountFilter { low_amount: 0.1 },
@@ -257,17 +256,22 @@ mod test {
 
     #[test]
     fn reseller_no_data_iteration() {
-        let mut reseller = default_reseller(vec![Arc::new(Merchant::default())]);
+        let merchant = Merchant::default();
+        let merchants: Vec<&dyn merchant::Merchant> = vec![&merchant];
+        let mut reseller = default_reseller(merchants);
         let result = block_on(reseller.iterate());
         assert!(result.is_err())
     }
 
     #[test]
     fn reseller_simple_case() {
-        let mut reseller = default_reseller(vec![
-            Arc::new(Merchant::with_orders(90f64, 100f64)),
-            Arc::new(Merchant::with_orders(120f64, 100f64)),
-        ]);
+        let merchant_1 = Merchant::with_orders(90f64, 100f64);
+        let merchant_2 = Merchant::with_orders(120f64, 100f64);
+        let merchants: Vec<&dyn merchant::Merchant> = vec![
+            &merchant_1,
+            &merchant_2,
+        ];
+        let mut reseller = default_reseller(merchants);
         let id = 1.to_string();
         let price = 10f64;
         let amount = 120f64;
