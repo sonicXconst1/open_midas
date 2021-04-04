@@ -12,7 +12,7 @@ pub type Price = f64;
 pub type Amount = f64;
 pub type Storage = HashMap<Coins, Vec<Entry>>;
 
-#[derive(Debug)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
 pub struct Entry {
     pub price: Price,
     pub amount: Amount,
@@ -26,8 +26,8 @@ impl Entry {
 
 pub struct Reseller<'a> {
     merchants: Vec<&'a dyn Merchant>,
-    market_buy_storage: Storage,
-    market_sell_storage: Storage,
+    pub market_buy_storage: Storage,
+    pub market_sell_storage: Storage,
     low_amount_filter: LowAmountFilter,
     amount_calculator: AmountCalculator,
     min_profit: f64,
