@@ -1,6 +1,6 @@
+use agnostic::order::OrderWithId;
 use agnostic::trade;
 use agnostic::trade::TradeResult;
-use agnostic::order::OrderWithId;
 use agnostic::trading_pair;
 use std::io::Read;
 use std::io::Seek;
@@ -8,6 +8,7 @@ use std::io::Write;
 
 pub struct Bookkeeper {
     trades: std::fs::File,
+    in_memory_trades: Vec<Trade>,
 }
 
 impl Bookkeeper {
@@ -35,7 +36,11 @@ impl Bookkeeper {
         if let Ok(entries) = std::fs::read_dir(".") {
             for entry in entries {
                 let entry = entry.unwrap();
-                if let Some(extension) = entry.path().extension().map_or(None, |extension| Some(extension.to_owned())) {
+                if let Some(extension) = entry
+                    .path()
+                    .extension()
+                    .map_or(None, |extension| Some(extension.to_owned()))
+                {
                     if extension == Self::DEFAULT_EXTENSION {
                         return Some(Self::open(entry.path()));
                     }
@@ -47,36 +52,42 @@ impl Bookkeeper {
         }
     }
 
-    fn open(filename: std::path::PathBuf) -> std::io::Result<Bookkeeper> {
-        let trades = std::fs::OpenOptions::new()
+    pub fn open(filename: std::path::PathBuf) -> std::io::Result<Bookkeeper> {
+        let mut trades = std::fs::OpenOptions::new()
             .write(true)
             .read(true)
             .create(true)
             .open(&filename)?;
-        Ok(Bookkeeper { trades })
+        let in_memory_trades = Self::read_trades(&mut trades)?
+            .into_iter()
+            .map(|trade| trade.into())
+            .collect();
+        Ok(Bookkeeper {
+            trades,
+            in_memory_trades,
+        })
     }
 
-    pub fn commit_trade(&mut self, trade: trade::Trade) {
-        let trade: Trade = trade.into();
-        let mut trade = serde_json::to_string(&trade).expect("Serialization error");
-        trade.push(Self::SPLITTER);
-        self.trades
-            .seek(std::io::SeekFrom::End(0))
-            .expect("Failed to seek to end");
-        self.trades
-            .write_all(trade.as_bytes())
-            .expect("Failed to commit order");
+    pub fn commit_trade(&mut self, trade: trade::Trade) -> Result<(), std::io::Error> {
+        self.in_memory_trades.push(trade.into());
+        Self::write_trades(&mut self.trades, &self.in_memory_trades)
     }
 
     pub fn get_all_trades(&mut self) -> Vec<Trade> {
+        self.in_memory_trades.clone()
+    }
+
+    fn write_trades(file: &mut std::fs::File, trades: &[Trade]) -> Result<(), std::io::Error> {
+        file.seek(std::io::SeekFrom::Start(0))?;
+        file.set_len(0)?;
+        file.write_all(serde_json::to_string(&trades)?.as_bytes())
+    }
+
+    fn read_trades(trades: &mut std::fs::File) -> Result<Vec<Trade>, std::io::Error> {
         let mut result = String::with_capacity(100);
-        self.trades
-            .seek(std::io::SeekFrom::Start(0))
-            .expect("Failed to seek to start");
-        self.trades
-            .read_to_string(&mut result)
-            .expect("Failed to read trades.");
-        result
+        trades.seek(std::io::SeekFrom::Start(0))?;
+        trades.read_to_string(&mut result)?;
+        Ok(result
             .split(Self::SPLITTER)
             .filter_map(
                 |trade_json| match serde_json::from_str::<Trade>(&trade_json) {
@@ -84,7 +95,7 @@ impl Bookkeeper {
                     Err(_error) => None,
                 },
             )
-            .collect()
+            .collect())
     }
 
     pub fn get_trades_result(&mut self) -> TradingResult {
@@ -104,13 +115,12 @@ pub struct TradingResult {
 
 impl TradingResult {
     pub fn aggregate(trades: Vec<Trade>) -> TradingResult {
-        let (sold, bought) =
-            trades
-                .into_iter()
-                .fold((0f64, 0f64), |acc, order| match order.side {
-                    Side::Buy => (acc.0, acc.1 + order.amount),
-                    Side::Sell => (acc.0 + order.amount, acc.1),
-                });
+        let (sold, bought) = trades
+            .into_iter()
+            .fold((0f64, 0f64), |acc, order| match order.side {
+                Side::Buy => (acc.0, acc.1 + order.amount),
+                Side::Sell => (acc.0 + order.amount, acc.1),
+            });
         TradingResult { sold, bought }
     }
 }
@@ -194,10 +204,10 @@ impl From<trade::Trade> for Trade {
             trade::Trade::Market(result) => (
                 result.id,
                 result.trading_pair.coins,
-                result.trading_pair.side, 
+                result.trading_pair.side,
                 Target::Market,
                 result.price,
-                result.amount
+                result.amount,
             ),
             trade::Trade::Limit(order) => (
                 order.id,
@@ -209,7 +219,7 @@ impl From<trade::Trade> for Trade {
             ),
         };
         Trade {
-            id, 
+            id,
             coins: coins.into(),
             side: side.into(),
             target,
@@ -271,10 +281,10 @@ mod test {
         bookkeeper.clear_trades();
         let orders = bookkeeper.get_all_trades();
         assert_eq!(orders.len(), 0, "Invalid length");
-        bookkeeper.commit_trade(trade.clone());
+        assert!(bookkeeper.commit_trade(trade.clone()).is_ok());
         let orders = bookkeeper.get_all_trades();
         assert_eq!(orders.len(), 1, "Invalid length");
-        bookkeeper.commit_trade(trade);
+        assert!(bookkeeper.commit_trade(trade).is_ok());
         let orders = bookkeeper.get_all_trades();
         assert_eq!(orders.len(), 2, "Invalid length");
     }
