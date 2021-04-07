@@ -69,19 +69,19 @@ impl<'a> Reseller<'a> {
     pub async fn iterate(&mut self) -> Result<Trade, String> {
         let target = Target::Market;
         for side in &[Side::Sell, Side::Buy] {
-            let storage = match side {
-                Side::Sell => &mut self.market_buy_storage,
-                Side::Buy => &mut self.market_sell_storage,
+            let (storage, entry_side) = match side {
+                Side::Sell => (&mut self.market_buy_storage, Side::Buy),
+                Side::Buy => (&mut self.market_sell_storage, Side::Sell),
             };
             for (coins, entries) in storage.iter_mut() {
                 let (entry_index, the_best_entry) =
-                    match find_best_entry(&entries, side.clone().reversed()) {
+                    match find_best_entry(&entries, entry_side) {
                         Some(entry) => entry,
                         None => continue,
                     };
                 let trading_pair = TradingPair {
                     coins: coins.clone(),
-                    target: target.clone(),
+                    target,
                     side: side.clone(),
                 };
                 let (the_best_order, merchant) = find_the_best_order(
@@ -101,7 +101,7 @@ impl<'a> Reseller<'a> {
                     Some(profit) => {
                         if profit >= self.min_profit {
                             let trader = merchant.trader();
-                            match trader.create_order(the_best_order).await {
+                            match trader.create_order(the_best_order.clone()).await {
                                 Ok(trade) => {
                                     if the_best_entry.amount - trade.amount() <= 0.0 {
                                         entries.remove(entry_index);
@@ -112,7 +112,10 @@ impl<'a> Reseller<'a> {
                                     self.accept_trade(trade.clone());
                                     return Ok(trade);
                                 }
-                                Err(_) => (),
+                                Err(error) => return Err(format!(
+                                    "Failed to create an order {:#?}\n\t Error!: {:#?}",
+                                    the_best_order,
+                                    error)),
                             }
                         }
                     }
@@ -207,26 +210,26 @@ async fn find_the_best_order<'a>(
                     price: the_best_order.price,
                     amount,
                 });
-                the_best_merchant = Some(merchant.clone());
+                the_best_merchant = Some(merchant);
             }
             (Side::Sell, Some(order)) => {
                 if the_best_order.price > order.price {
                     order.price = the_best_order.price;
                     order.amount = amount;
-                    the_best_merchant = Some(merchant.clone());
+                    the_best_merchant = Some(merchant);
                 }
             }
             (Side::Buy, Some(order)) => {
                 if the_best_order.price < order.price {
                     order.price = the_best_order.price;
-                    order.amount = order.amount;
-                    the_best_merchant = Some(merchant.clone());
+                    order.amount = amount;
+                    the_best_merchant = Some(merchant);
                 }
             }
         }
     }
     match (result, the_best_merchant) {
-        (Some(order), Some(merchant)) => Ok((order, merchant)),
+        (Some(order), Some(merchant)) => Ok((order, *merchant)),
         _ => Err(format!("Failed to find the best order: {}", result_error)),
     }
 }
