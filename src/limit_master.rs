@@ -2,14 +2,15 @@ use agnostic::merchant::Merchant;
 use agnostic::trade::Trade;
 use agnostic::trading_pair::{Coins, Side, Target, TradingPair};
 use agnostic::order::Order;
+use std::collections::HashMap;
 
 pub struct LimitProposal {
 }
 
 #[derive(Default, Clone, Debug)]
 pub struct OrdersStorage {
-    pub market: Vec<Order>,
-    pub limit: Vec<Order>,
+    pub market: HashMap<Side, Vec<Order>>,
+    pub limit: HashMap<Side, Vec<Order>>,
 }
 
 #[allow(dead_code)]
@@ -19,19 +20,16 @@ pub struct LimitMaster<'a> {
 
 impl<'a> LimitMaster<'a> {
     pub async fn iterate(&self, coins: Coins) -> Result<Trade, String> {
-        let _orders_storage = self.accumulate_merchants_infomration(coins).await;
+        let orders_storage = self.accumulate_merchants_infomration(coins).await;
         unimplemented!()
     }
 
     async fn accumulate_merchants_infomration(&self, coins: Coins) -> OrdersStorage {
-        let mut market_orders_collection = Vec::new();
-        let mut limit_orders_collection = Vec::new();
+        let mut market_orders_collection = HashMap::new();
+        let mut limit_orders_collection = HashMap::new();
         for side in &[Side::Sell, Side::Buy] {
             for target in &[Target::Market, Target::Limit] {
-                let collection = match target {
-                    Target::Market => &mut market_orders_collection,
-                    Target::Limit => &mut limit_orders_collection,
-                };
+                let mut collection = Vec::new();
                 for merchant in self.merchants.iter() {
                     let trading_pair = TradingPair {
                         coins,
@@ -44,6 +42,12 @@ impl<'a> LimitMaster<'a> {
                         .into_iter()
                         .for_each(|order| collection.push(order));
                 };
+                /*
+                match target {
+                    Target::Market => market_orders_collection.insert(side.clone(), collection).unwrap(),
+                    Target::Limit => limit_orders_collection.insert(side.clone(), collection).unwrap(),
+                };
+                */
             };
         };
         OrdersStorage {
