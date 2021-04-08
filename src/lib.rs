@@ -1,4 +1,5 @@
 pub mod best_price_trader;
+pub mod limit_master;
 pub mod bookkeeper;
 pub mod reseller;
 pub mod reseller_saver;
