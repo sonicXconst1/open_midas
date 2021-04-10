@@ -42,12 +42,10 @@ impl<'a> LimitMaster<'a> {
                         .into_iter()
                         .for_each(|order| collection.push(order));
                 };
-                /*
                 match target {
-                    Target::Market => market_orders_collection.insert(side.clone(), collection).unwrap(),
-                    Target::Limit => limit_orders_collection.insert(side.clone(), collection).unwrap(),
+                    Target::Market => market_orders_collection.insert(*side, collection).unwrap(),
+                    Target::Limit => limit_orders_collection.insert(*side, collection).unwrap(),
                 };
-                */
             };
         };
         OrdersStorage {
