@@ -4,11 +4,10 @@ use agnostic::trading_pair::{Coins, Side, Target, TradingPair};
 use agnostic::order::{Order, OrderWithId};
 use std::collections::HashMap;
 
-// 1. Aggregate data from merchants.
-// 2. We should also check our current orders. If their volume changed - do some action: make
-// a trade or something.
-// 3. Update data aggregation.
-// 3. Check state of currency orders. How?!
+// Accepts price estimator. Price estimator calculate a price from orders & trading_pair.
+// Checks placed orders for update. If order was updated - returns a Trade.
+// Result of the iteration is a vector of orders.
+// Then reseller accepts trade and performs an iteration.
 
 pub type MerchantId = usize;
 
@@ -42,7 +41,8 @@ pub struct LimitMaster<'a> {
 
 impl<'a> LimitMaster<'a> {
     pub async fn iterate(&self, coins: Coins) -> Result<Trade, String> {
-        let stock_orders_storage = self.accumulate_merchants_infomration(coins).await;
+        let _stock_orders_storage = self.accumulate_merchants_infomration(coins).await;
+        let _my_current_orders = self.accumulate_my_current_order(coins).await;
         unimplemented!()
     }
 
