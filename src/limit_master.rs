@@ -1,13 +1,25 @@
+//! Limit Master
+//!
+//! There are two main stages: check current limit orders state & update current limit orders
+//! state.
+//!
+//! Check: If order was updated - returns a Trade.
+//!
+//! Update: If there is a possibility to create better trade - do it. Or maybe it's better to
+//! remove all current orders and simply place new ones?
+//! Accepts price estimator. 
+//! Price estimator calculate a price from orders & trading_pair.
+//! Price estimator calculates the price for good order without any respect to curreny balance.
+//!
+//! Result of the iteration is a vector of orders.
+//! Then reseller accepts trade and performs an iteration.
+//!
 use agnostic::merchant::Merchant;
 use agnostic::trade::Trade;
 use agnostic::trading_pair::{Coins, Side, Target, TradingPair};
 use agnostic::order::{Order, OrderWithId};
 use std::collections::HashMap;
 
-// Accepts price estimator. Price estimator calculate a price from orders & trading_pair.
-// Checks placed orders for update. If order was updated - returns a Trade.
-// Result of the iteration is a vector of orders.
-// Then reseller accepts trade and performs an iteration.
 
 pub type MerchantId = usize;
 
@@ -33,19 +45,11 @@ pub struct OrdersStorage<TOrder> {
     pub stock_limit: HashMap<Side, Vec<LimitMasterOrder<TOrder>>>,
 }
 
-#[allow(dead_code)]
-pub struct LimitMaster<'a> {
+pub struct MerchantIdManager<'a> {
     merchants: &'a [&'a dyn Merchant],
-    my_orders_last_state: OrdersStorage<OrderWithId>,
 }
 
-impl<'a> LimitMaster<'a> {
-    pub async fn iterate(&self, coins: Coins) -> Result<Trade, String> {
-        let _stock_orders_storage = self.accumulate_merchants_infomration(coins).await;
-        let _my_current_orders = self.accumulate_my_current_order(coins).await;
-        unimplemented!()
-    }
-
+impl<'a> MerchantIdManager<'a> {
     pub fn get_mercahnt_id(&self, merchant: &dyn Merchant) -> Option<MerchantId> {
         self.merchants
             .iter()
@@ -56,6 +60,44 @@ impl<'a> LimitMaster<'a> {
 
     pub fn get_merchant(&self, id: MerchantId) -> Option<&dyn Merchant> {
         self.merchants.get(id).map(|value| *value)
+    }
+
+    pub fn iter(&self) -> std::slice::Iter<'_, &dyn Merchant> {
+        self.merchants.iter()
+    }
+}
+
+pub struct LimitMaster<'a> {
+    merchants_manager: MerchantIdManager<'a>,
+    my_orders_last_state: OrdersStorage<OrderWithId>,
+}
+
+impl<'a> LimitMaster<'a> {
+    pub async fn check_current_orders(&mut self, coins: Coins) -> Result<Vec<Trade>, String> {
+        let mut performed_trades = Vec::new();
+        let my_current_orders = self.accumulate_my_current_order(coins).await;
+        for (_last_side, last_orders) in self.my_orders_last_state.stock_limit.iter_mut() {
+            for (_current_side, current_orders) in my_current_orders.stock_limit.iter() {
+                for last_order in last_orders.iter_mut() {
+                    for current_order in current_orders.iter() {
+                        if last_order.merchant_id == current_order.merchant_id 
+                            && last_order.order.id == current_order.order.id {
+                            if last_order.order.amount > current_order.order.amount {
+                                let mut performed_order = last_order.order.clone();
+                                performed_order.amount -= current_order.order.amount;
+                                last_order.order.amount = current_order.order.amount;
+                                performed_trades.push(Trade::Limit(performed_order));
+                            } 
+                        }
+                    }
+                }
+            }
+        }
+        Ok(performed_trades)
+    }
+
+    pub async fn update_orders(&mut self, coins: Coins) -> Result<(), String> {
+        unimplemented!()
     }
 
     async fn accumulate_merchants_infomration(&self, coins: Coins) -> OrdersStorage<Order> {
@@ -88,7 +130,7 @@ impl<'a> LimitMaster<'a> {
         for side in &[Side::Sell, Side::Buy] {
             for target in &[Target::Market, Target::Limit] {
                 let mut collection = Vec::new();
-                for merchant in self.merchants.iter() {
+                for merchant in self.merchants_manager.iter() {
                     let trading_pair = TradingPair {
                         coins,
                         side: side.clone(),
@@ -97,7 +139,7 @@ impl<'a> LimitMaster<'a> {
                     sniff_callback(*merchant, trading_pair).await
                         .into_iter()
                         .for_each(|order| collection.push(LimitMasterOrder::new(
-                                    self.get_mercahnt_id(*merchant).unwrap(),
+                                    self.merchants_manager.get_mercahnt_id(*merchant).unwrap(),
                                     order)));
                 };
                 match target {
