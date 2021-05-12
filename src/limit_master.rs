@@ -18,20 +18,18 @@ use agnostic::merchant::Merchant;
 use agnostic::trade::Trade;
 use agnostic::trading_pair::{Coins, Side, Target, TradingPair};
 use agnostic::order::{Order, OrderWithId};
-use std::collections::HashMap;
-
 
 pub type MerchantId = usize;
 
 #[derive(Clone, Debug)]
-pub struct LimitMasterOrder<TOrder> {
+pub struct OrderEntity<TOrder> {
     pub merchant_id: MerchantId,
     pub order: TOrder,
 }
 
-impl<TOrder> LimitMasterOrder<TOrder> {
+impl<TOrder> OrderEntity<TOrder> {
     pub fn new(merchant_id: MerchantId, order: TOrder) -> Self {
-        LimitMasterOrder {
+        OrderEntity {
             merchant_id,
             order,
         }
@@ -41,8 +39,8 @@ impl<TOrder> LimitMasterOrder<TOrder> {
 #[derive(Clone, Debug)]
 pub struct OrdersStorage<TOrder> {
     pub coins: Coins,
-    pub stock_market: HashMap<Side, Vec<LimitMasterOrder<TOrder>>>,
-    pub stock_limit: HashMap<Side, Vec<LimitMasterOrder<TOrder>>>,
+    pub sell_stock: Vec<OrderEntity<TOrder>>,
+    pub buy_stock: Vec<OrderEntity<TOrder>>,
 }
 
 pub struct MerchantIdManager<'a> {
@@ -76,20 +74,16 @@ impl<'a> LimitMaster<'a> {
     pub async fn check_current_orders(&mut self, coins: Coins) -> Result<Vec<Trade>, String> {
         let mut performed_trades = Vec::new();
         let my_current_orders = self.accumulate_my_current_order(coins).await;
-        for (_last_side, last_orders) in self.my_orders_last_state.stock_limit.iter_mut() {
-            for (_current_side, current_orders) in my_current_orders.stock_limit.iter() {
-                for last_order in last_orders.iter_mut() {
-                    for current_order in current_orders.iter() {
-                        if last_order.merchant_id == current_order.merchant_id 
-                            && last_order.order.id == current_order.order.id {
-                            if last_order.order.amount > current_order.order.amount {
-                                let mut performed_order = last_order.order.clone();
-                                performed_order.amount -= current_order.order.amount;
-                                last_order.order.amount = current_order.order.amount;
-                                performed_trades.push(Trade::Limit(performed_order));
-                            } 
-                        }
-                    }
+        for last_order in self.my_orders_last_state.buy_stock.iter_mut() {
+            for current_order in my_current_orders.buy_stock.iter() {
+                if last_order.merchant_id == current_order.merchant_id 
+                    && last_order.order.id == current_order.order.id {
+                    if last_order.order.amount > current_order.order.amount {
+                        let mut performed_order = last_order.order.clone();
+                        performed_order.amount -= current_order.order.amount;
+                        last_order.order.amount = current_order.order.amount;
+                        performed_trades.push(Trade::Limit(performed_order));
+                    } 
                 }
             }
         }
@@ -97,6 +91,7 @@ impl<'a> LimitMaster<'a> {
     }
 
     pub async fn update_orders(&mut self, coins: Coins) -> Result<(), String> {
+        let _orders_storage = self.accumulate_merchants_infomration(coins).await;
         unimplemented!()
     }
 
@@ -125,33 +120,36 @@ impl<'a> LimitMaster<'a> {
         coins: Coins,
         sniff_callback: impl Fn(&dyn Merchant, TradingPair) -> std::pin::Pin<Box<dyn futures::Future<Output = TOutput>>>
     ) -> OrdersStorage<TOutput::Item> {
-        let mut market_orders_collection = HashMap::new();
-        let mut limit_orders_collection = HashMap::new();
-        for side in &[Side::Sell, Side::Buy] {
-            for target in &[Target::Market, Target::Limit] {
-                let mut collection = Vec::new();
-                for merchant in self.merchants_manager.iter() {
-                    let trading_pair = TradingPair {
-                        coins,
-                        side: side.clone(),
-                        target: target.clone(),
-                    };
-                    sniff_callback(*merchant, trading_pair).await
-                        .into_iter()
-                        .for_each(|order| collection.push(LimitMasterOrder::new(
-                                    self.merchants_manager.get_mercahnt_id(*merchant).unwrap(),
-                                    order)));
-                };
-                match target {
-                    Target::Market => market_orders_collection.insert(*side, collection).unwrap(),
-                    Target::Limit => limit_orders_collection.insert(*side, collection).unwrap(),
-                };
+        let mut sell_orders_collection = Vec::new();
+        let mut buy_orders_collection = Vec::new();
+        for merchant in self.merchants_manager.iter() {
+            let trading_pair = TradingPair {
+                coins,
+                side: Side::Sell,
+                target: Target::Limit,
             };
+            sniff_callback(*merchant, trading_pair).await
+                .into_iter()
+                .for_each(|order| sell_orders_collection.push(OrderEntity::new(
+                            self.merchants_manager.get_mercahnt_id(*merchant).unwrap(),
+                            order)));
+        };
+        for merchant in self.merchants_manager.iter() {
+            let trading_pair = TradingPair {
+                coins,
+                side: Side::Buy,
+                target: Target::Limit,
+            };
+            sniff_callback(*merchant, trading_pair).await
+                .into_iter()
+                .for_each(|order| buy_orders_collection.push(OrderEntity::new(
+                            self.merchants_manager.get_mercahnt_id(*merchant).unwrap(),
+                            order)));
         };
         OrdersStorage {
             coins,
-            stock_market: market_orders_collection,
-            stock_limit: limit_orders_collection,
+            buy_stock: buy_orders_collection,
+            sell_stock: sell_orders_collection,
         }
     }
 }
