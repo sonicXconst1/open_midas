@@ -18,6 +18,9 @@ use agnostic::merchant::Merchant;
 use agnostic::trade::Trade;
 use agnostic::trading_pair::{Coins, Side, Target, TradingPair};
 use agnostic::order::{Order, OrderWithId};
+use crate::calculators::AmountCalculator;
+use crate::calculators::amount_calculator::Balance;
+use crate::calculators::price_calculator::PriceCalculator;
 
 pub type MerchantId = usize;
 
@@ -39,8 +42,19 @@ impl<TOrder> OrderEntity<TOrder> {
 #[derive(Clone, Debug)]
 pub struct OrdersStorage<TOrder> {
     pub coins: Coins,
-    pub sell_stock: Vec<OrderEntity<TOrder>>,
-    pub buy_stock: Vec<OrderEntity<TOrder>>,
+    sell_stock: Vec<OrderEntity<TOrder>>,
+    buy_stock: Vec<OrderEntity<TOrder>>,
+}
+
+impl<TOrder> OrdersStorage<TOrder> {
+    pub fn get_stock(&self, target: Target, side: Side) -> &[OrderEntity<TOrder>] {
+        match (target, side) {
+            (Target::Limit, Side::Buy) => &self.buy_stock[..],
+            (Target::Limit, Side::Sell) => &self.sell_stock[..],
+            (Target::Market, Side::Buy) => &self.sell_stock[..],
+            (Target::Market, Side::Sell) => &self.buy_stock[..],
+        }
+    }
 }
 
 pub struct MerchantIdManager<'a> {
@@ -68,6 +82,8 @@ impl<'a> MerchantIdManager<'a> {
 pub struct LimitMaster<'a> {
     merchants_manager: MerchantIdManager<'a>,
     my_orders_last_state: OrdersStorage<OrderWithId>,
+    price_calculator: PriceCalculator,
+    amount_calculator: AmountCalculator,
 }
 
 impl<'a> LimitMaster<'a> {
@@ -91,7 +107,70 @@ impl<'a> LimitMaster<'a> {
     }
 
     pub async fn update_orders(&mut self, coins: Coins) -> Result<(), String> {
-        let _orders_storage = self.accumulate_merchants_infomration(coins).await;
+        self.delete_all_my_orders(coins).await;
+        let current_orders_storage = self.accumulate_merchants_infomration(coins).await;
+        self.update_orders_on_side(coins, Side::Buy, &current_orders_storage).await.unwrap();
+        self.update_orders_on_side(coins, Side::Sell, &current_orders_storage).await
+    }
+
+    async fn update_orders_on_side(
+        &mut self,
+        coins: Coins,
+        side: Side,
+        current_orders_storage: &OrdersStorage<Order>) -> Result<(), String> {
+        let market_stock: Vec<_> = current_orders_storage
+            .get_stock(Target::Market, side)
+            .iter()
+            .filter(|entity| entity.order.amount > 100.0)
+            .collect();
+        let best_stock_order = market_stock.get(0).unwrap();
+        let market_trading_pair = TradingPair {
+            coins,
+            side,
+            target: Target::Market,
+        };
+        let price_for_limit_order = match side {
+            Side::Buy => self.price_calculator.high(best_stock_order.order.price),
+            Side::Sell => self.price_calculator.low(best_stock_order.order.price),
+        };
+        for merchant in self.merchants_manager.iter() {
+            let accountant = merchant.accountant();
+            let balance = accountant.ask(market_trading_pair.coin_to_spend()).await?;
+            let balance = Balance {
+                amount: balance.amount,
+                fee: self.amount_calculator.fee,
+            };
+            let limit_order_amount = self.amount_calculator.evaluate(
+                best_stock_order.order.amount,
+                &balance).unwrap();
+            let trader = merchant.trader();
+            match trader.create_order(Order {
+                trading_pair: TradingPair {
+                    coins,
+                    side,
+                    target: Target::Limit,
+                },
+                price: price_for_limit_order,
+                amount: limit_order_amount.value()
+            }).await {
+                Ok(Trade::Limit(order)) => {
+                    let merchant_id = self.merchants_manager.get_mercahnt_id(*merchant).unwrap();
+                    let stock = match side {
+                        Side::Buy => &mut self.my_orders_last_state.sell_stock,
+                        Side::Sell => &mut self.my_orders_last_state.buy_stock,
+                    };
+                    stock.push(OrderEntity {
+                        merchant_id,
+                        order,
+                    });
+                },
+                _ => panic!("Failed to create order"),
+            };
+        }
+        Ok(())
+    }
+
+    async fn delete_all_my_orders(&mut self, _coins: Coins) {
         unimplemented!()
     }
 
