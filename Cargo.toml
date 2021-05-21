@@ -8,12 +8,13 @@ edition = "2018"
 
 [dependencies]
 agnostic = { git="https://github.com/sonicxconst1/agnostic.git", branch="master" }
-time = { version = "0.*" }
-log = { version= "0.*" }
-serde = { version = "1.*", features = ["derive"]}
-serde_json = { version = "1.*" }
-futures = { version = "0.*" }
+time = { version = "*" }
+log = { version= "*" }
+serde = { version = "*", features = ["derive"]}
+serde_json = { version = "*" }
+futures = { version = "*" }
 
 [dev-dependencies]
 agnostic_test = { git="https://github.com/sonicxconst1/agnostic_test.git", branch="main" }
-tokio-test = { version = "0.*" }
+tokio = { version = "*",  features = ["rt", "macros"]}
+tokio-test = { version = "*"}
