@@ -16,5 +16,4 @@ futures = { version = "*" }
 
 [dev-dependencies]
 agnostic_test = { git="https://github.com/sonicxconst1/agnostic_test.git", branch="main" }
-tokio = { version = "*",  features = ["rt", "macros"]}
 tokio-test = { version = "*"}

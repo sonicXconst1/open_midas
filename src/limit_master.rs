@@ -85,6 +85,19 @@ impl<'a> MerchantIdManager<'a> {
     }
 }
 
+#[derive(Clone, Copy, Debug)]
+pub struct Update {
+    sell: UpdateOrder,
+    buy: UpdateOrder,
+}
+
+
+#[derive(Clone, Copy, Debug)]
+pub enum UpdateOrder {
+    Updated,
+    NoOrdersToUpdate
+}
+
 pub struct LimitMaster<'a> {
     coins: Coins,
     merchants_manager: MerchantIdManager<'a>,
@@ -132,24 +145,36 @@ impl<'a> LimitMaster<'a> {
         Ok(performed_trades)
     }
 
-    pub async fn update_orders(&mut self) -> Result<(), String> {
+    pub async fn update_orders(&mut self) -> Result<Update, String> {
         self.delete_all_my_orders().await?;
         let current_orders_storage = self.accumulate_merchants_infomration().await;
-        self.update_orders_on_side(Side::Buy, &current_orders_storage).await.unwrap();
-        self.update_orders_on_side(Side::Sell, &current_orders_storage).await
+        let buy = self
+            .update_orders_on_side(Side::Buy, &current_orders_storage)
+            .await?;
+        let sell = self
+            .update_orders_on_side(Side::Sell, &current_orders_storage)
+            .await?;
+        Ok(Update {
+            buy,
+            sell
+        })
     }
 
     async fn update_orders_on_side(
         &mut self,
         side: Side,
-        current_orders_storage: &OrdersStorage<Order>) -> Result<(), String> {
+        current_orders_storage: &OrdersStorage<Order>) -> Result<UpdateOrder, String> {
         let coins = self.coins.clone();
+        let min_amount = self.amount_calculator.min_amount_threshold;
         let market_stock: Vec<_> = current_orders_storage
             .get_stock(Target::Market, side)
             .iter()
-            .filter(|entity| entity.order.amount > 100.0)
+            .filter(|entity| entity.order.amount > min_amount)
             .collect();
-        let best_stock_order = market_stock.get(0).unwrap();
+        let best_stock_order = match market_stock.get(0) {
+            Some(order) => order,
+            None => return Ok(UpdateOrder::NoOrdersToUpdate),
+        };
         let market_trading_pair = TradingPair {
             coins,
             side,
@@ -193,7 +218,7 @@ impl<'a> LimitMaster<'a> {
                 _ => panic!("Failed to create order"),
             };
         }
-        Ok(())
+        Ok(UpdateOrder::Updated)
     }
 
     async fn delete_all_my_orders(&mut self) -> Result<(), String> {
