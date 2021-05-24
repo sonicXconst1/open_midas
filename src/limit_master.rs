@@ -7,20 +7,20 @@
 //!
 //! Update: If there is a possibility to create better trade - do it. Or maybe it's better to
 //! remove all current orders and simply place new ones?
-//! Accepts price estimator. 
+//! Accepts price estimator.
 //! Price estimator calculate a price from orders & trading_pair.
 //! Price estimator calculates the price for good order without any respect to curreny balance.
 //!
 //! Result of the iteration is a vector of orders.
 //! Then reseller accepts trade and performs an iteration.
 //!
-use agnostic::merchant::Merchant;
-use agnostic::trade::Trade;
-use agnostic::trading_pair::{Coins, Side, Target, TradingPair};
-use agnostic::order::{Order, OrderWithId};
-use crate::calculators::AmountCalculator;
 use crate::calculators::amount_calculator::Balance;
 use crate::calculators::price_calculator::PriceCalculator;
+use crate::calculators::AmountCalculator;
+use agnostic::merchant::Merchant;
+use agnostic::order::{Order, OrderWithId};
+use agnostic::trade::Trade;
+use agnostic::trading_pair::{Coins, Side, Target, TradingPair};
 
 pub type MerchantId = usize;
 
@@ -32,10 +32,7 @@ pub struct OrderEntity<TOrder> {
 
 impl<TOrder> OrderEntity<TOrder> {
     pub fn new(merchant_id: MerchantId, order: TOrder) -> Self {
-        OrderEntity {
-            merchant_id,
-            order,
-        }
+        OrderEntity { merchant_id, order }
     }
 }
 
@@ -63,9 +60,7 @@ pub struct MerchantIdManager<'a> {
 
 impl<'a> MerchantIdManager<'a> {
     pub fn new(merchants: &'a [&'a dyn Merchant]) -> Self {
-        MerchantIdManager {
-            merchants
-        }
+        MerchantIdManager { merchants }
     }
 
     pub fn get_mercahnt_id(&self, merchant: &dyn Merchant) -> Option<MerchantId> {
@@ -91,11 +86,10 @@ pub struct Update {
     buy: UpdateOrder,
 }
 
-
 #[derive(Clone, Copy, Debug)]
 pub enum UpdateOrder {
     Updated,
-    NoOrdersToUpdate
+    NoOrdersToUpdate,
 }
 
 pub struct LimitMaster<'a> {
@@ -111,7 +105,7 @@ impl<'a> LimitMaster<'a> {
         coins: Coins,
         merchants_manager: MerchantIdManager<'a>,
         price_calculator: PriceCalculator,
-        amount_calculator: AmountCalculator
+        amount_calculator: AmountCalculator,
     ) -> Self {
         LimitMaster {
             coins: coins.clone(),
@@ -122,27 +116,70 @@ impl<'a> LimitMaster<'a> {
                 coins,
                 sell_stock: Vec::with_capacity(16),
                 buy_stock: Vec::with_capacity(16),
-            }
+            },
         }
     }
 
     pub async fn check_current_orders(&mut self) -> Result<Vec<Trade>, String> {
-        let mut performed_trades = Vec::new();
         let my_current_orders = self.accumulate_my_current_order().await;
-        for last_order in self.my_orders_last_state.buy_stock.iter_mut() {
-            for current_order in my_current_orders.buy_stock.iter() {
-                if last_order.merchant_id == current_order.merchant_id 
-                    && last_order.order.id == current_order.order.id {
-                    if last_order.order.amount > current_order.order.amount {
-                        let mut performed_order = last_order.order.clone();
-                        performed_order.amount -= current_order.order.amount;
-                        last_order.order.amount = current_order.order.amount;
-                        performed_trades.push(Trade::Limit(performed_order));
-                    } 
-                }
-            }
-        }
-        Ok(performed_trades)
+        let performed_trades = self.my_orders_last_state.buy_stock.iter_mut().fold(
+            Vec::with_capacity(16),
+            |mut acc, last_order| {
+                my_current_orders
+                    .buy_stock
+                    .iter()
+                    .find(|item| {
+                        item.merchant_id == last_order.merchant_id
+                            && item.order.id == last_order.order.id
+                    })
+                    .map_or_else(
+                        || Some(Trade::Limit(last_order.order.clone())),
+                        |current_order| {
+                            if current_order.order.amount < last_order.order.amount {
+                                let mut performed_order = last_order.order.clone();
+                                performed_order.amount -= current_order.order.amount;
+                                Some(Trade::Limit(performed_order))
+                            } else {
+                                None
+                            }
+                        },
+                    )
+                    .and_then(|trade| {
+                        last_order.order.amount -= trade.amount();
+                        Some(acc.push(trade))
+                    });
+                acc
+            },
+        );
+        Ok(self.my_orders_last_state.sell_stock.iter_mut().fold(
+            performed_trades,
+            |mut acc, last_order| {
+                my_current_orders
+                    .sell_stock
+                    .iter()
+                    .find(|item| {
+                        item.merchant_id == last_order.merchant_id
+                            && item.order.id == last_order.order.id
+                    })
+                    .map_or_else(
+                        || Some(Trade::Limit(last_order.order.clone())),
+                        |current_order| {
+                            if current_order.order.amount < last_order.order.amount {
+                                let mut performed_order = last_order.order.clone();
+                                performed_order.amount -= current_order.order.amount;
+                                Some(Trade::Limit(performed_order))
+                            } else {
+                                None
+                            }
+                        },
+                    )
+                    .and_then(|trade| {
+                        last_order.order.amount -= trade.amount();
+                        Some(acc.push(trade))
+                    });
+                acc
+            },
+        ))
     }
 
     pub async fn update_orders(&mut self) -> Result<Update, String> {
@@ -154,16 +191,14 @@ impl<'a> LimitMaster<'a> {
         let sell = self
             .update_orders_on_side(Side::Sell, &current_orders_storage)
             .await?;
-        Ok(Update {
-            buy,
-            sell
-        })
+        Ok(Update { buy, sell })
     }
 
     async fn update_orders_on_side(
         &mut self,
         side: Side,
-        current_orders_storage: &OrdersStorage<Order>) -> Result<UpdateOrder, String> {
+        current_orders_storage: &OrdersStorage<Order>,
+    ) -> Result<UpdateOrder, String> {
         let coins = self.coins.clone();
         let min_amount = self.amount_calculator.min_amount_threshold;
         let market_stock: Vec<_> = current_orders_storage
@@ -191,30 +226,31 @@ impl<'a> LimitMaster<'a> {
                 amount: balance.amount,
                 fee: self.amount_calculator.fee,
             };
-            let limit_order_amount = self.amount_calculator.evaluate(
-                best_stock_order.order.amount,
-                &balance).unwrap();
+            let limit_order_amount = self
+                .amount_calculator
+                .evaluate(best_stock_order.order.amount, &balance)
+                .unwrap();
             let trader = merchant.trader();
-            match trader.create_order(Order {
-                trading_pair: TradingPair {
-                    coins,
-                    side,
-                    target: Target::Limit,
-                },
-                price: price_for_limit_order,
-                amount: limit_order_amount.value()
-            }).await {
+            match trader
+                .create_order(Order {
+                    trading_pair: TradingPair {
+                        coins,
+                        side,
+                        target: Target::Limit,
+                    },
+                    price: price_for_limit_order,
+                    amount: limit_order_amount.value(),
+                })
+                .await
+            {
                 Ok(Trade::Limit(order)) => {
                     let merchant_id = self.merchants_manager.get_mercahnt_id(*merchant).unwrap();
                     let stock = match side {
                         Side::Buy => &mut self.my_orders_last_state.sell_stock,
                         Side::Sell => &mut self.my_orders_last_state.buy_stock,
                     };
-                    stock.push(OrderEntity {
-                        merchant_id,
-                        order,
-                    });
-                },
+                    stock.push(OrderEntity { merchant_id, order });
+                }
                 _ => panic!("Failed to create order"),
             };
         }
@@ -243,26 +279,28 @@ impl<'a> LimitMaster<'a> {
     async fn accumulate_merchants_infomration(&self) -> OrdersStorage<Order> {
         self.accumulate(|merchant, trading_pair| {
             let sniffer = merchant.sniffer();
-            let future = async move {
-                sniffer.all_the_best_orders(trading_pair, 15).await.unwrap()
-            };
+            let future =
+                async move { sniffer.all_the_best_orders(trading_pair, 15).await.unwrap() };
             Box::pin(future)
-        }).await
+        })
+        .await
     }
 
     async fn accumulate_my_current_order(&self) -> OrdersStorage<OrderWithId> {
         self.accumulate(|merchant, trading_pair| {
             let sniffer = merchant.sniffer();
-            let future = async move {
-                sniffer.get_my_orders(trading_pair).await.unwrap()
-            };
+            let future = async move { sniffer.get_my_orders(trading_pair).await.unwrap() };
             Box::pin(future)
-        }).await
+        })
+        .await
     }
 
     async fn accumulate<TOutput: std::iter::IntoIterator>(
         &self,
-        sniff_callback: impl Fn(&dyn Merchant, TradingPair) -> std::pin::Pin<Box<dyn futures::Future<Output = TOutput>>>
+        sniff_callback: impl Fn(
+            &dyn Merchant,
+            TradingPair,
+        ) -> std::pin::Pin<Box<dyn futures::Future<Output = TOutput>>>,
     ) -> OrdersStorage<TOutput::Item> {
         let coins = self.coins.clone();
         let mut sell_orders_collection = Vec::new();
@@ -273,24 +311,32 @@ impl<'a> LimitMaster<'a> {
                 side: Side::Sell,
                 target: Target::Limit,
             };
-            sniff_callback(*merchant, trading_pair).await
+            sniff_callback(*merchant, trading_pair)
+                .await
                 .into_iter()
-                .for_each(|order| sell_orders_collection.push(OrderEntity::new(
-                            self.merchants_manager.get_mercahnt_id(*merchant).unwrap(),
-                            order)));
-        };
+                .for_each(|order| {
+                    sell_orders_collection.push(OrderEntity::new(
+                        self.merchants_manager.get_mercahnt_id(*merchant).unwrap(),
+                        order,
+                    ))
+                });
+        }
         for merchant in self.merchants_manager.iter() {
             let trading_pair = TradingPair {
                 coins,
                 side: Side::Buy,
                 target: Target::Limit,
             };
-            sniff_callback(*merchant, trading_pair).await
+            sniff_callback(*merchant, trading_pair)
+                .await
                 .into_iter()
-                .for_each(|order| buy_orders_collection.push(OrderEntity::new(
-                            self.merchants_manager.get_mercahnt_id(*merchant).unwrap(),
-                            order)));
-        };
+                .for_each(|order| {
+                    buy_orders_collection.push(OrderEntity::new(
+                        self.merchants_manager.get_mercahnt_id(*merchant).unwrap(),
+                        order,
+                    ))
+                });
+        }
         OrdersStorage {
             coins,
             buy_stock: buy_orders_collection,
