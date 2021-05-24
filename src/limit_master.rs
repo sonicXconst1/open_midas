@@ -3,17 +3,7 @@
 //! There are two main stages: check current limit orders state & update current limit orders
 //! state.
 //!
-//! Check: If order was updated - returns a Trade.
-//!
-//! Update: If there is a possibility to create better trade - do it. Or maybe it's better to
-//! remove all current orders and simply place new ones?
-//! Accepts price estimator.
-//! Price estimator calculate a price from orders & trading_pair.
-//! Price estimator calculates the price for good order without any respect to curreny balance.
-//!
-//! Result of the iteration is a vector of orders.
-//! Then reseller accepts trade and performs an iteration.
-//!
+//! TODO: current tests do not change orders and we could not text the check method.
 use crate::calculators::amount_calculator::Balance;
 use crate::calculators::price_calculator::PriceCalculator;
 use crate::calculators::AmountCalculator;
