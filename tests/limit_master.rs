@@ -170,4 +170,9 @@ fn update_and_check() {
     for trader in test_context.traders.iter() {
         assert_eq!(trader.create_order_log.lock().unwrap().len(), 3);
     }
+
+    let trades = limit_master.check_current_orders();
+    let trades = tokio_test::block_on(trades);
+    assert!(trades.is_ok());
+    assert_eq!(trades.clone().unwrap().len(), 6, "{:#?}", trades);
 }
