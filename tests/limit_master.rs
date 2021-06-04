@@ -1,14 +1,15 @@
-#![feature(array_map)]
-#![feature(array_methods)]
 use agnostic::{
     merchant::Merchant,
     trading_pair::{Coins, Side, Target, TradingPair},
     order::OrderWithId,
     trade::Trade,
+    market::{Accountant, Sniffer},
 };
 use agnostic_test::{
     merchant::Merchant as MerchantTest,
-    trader::{TradesLogger, Trader as TraderTest}
+    trader::{TradesLogger, Trader as TraderTest},
+    sniffer::{Sniffer as SnifferTest, SnifferBuilder, OrderWithId as TestOrderWithId},
+    accountant::Accountant as AccountantTest,
 };
 use open_midas::{
     calculators::{amount_calculator::AmountCalculator, price_calculator::PriceCalculator},
@@ -16,58 +17,66 @@ use open_midas::{
 };
 use std::sync::Arc;
 
-pub struct LimitMasterTestContext<const TRADERS_COUNT: usize> {
-    pub traders: [Arc<TradesLogger>; TRADERS_COUNT],
-    pub merchants: [Arc<dyn Merchant>; TRADERS_COUNT]
+#[derive(Default)]
+pub struct LimitMasterTestContext {
+    pub traders: Vec<Arc<TradesLogger>>,
+    pub merchants: Vec<Arc<dyn Merchant>>,
 }
 
-impl<const TRADERS_COUNT: usize> LimitMasterTestContext<TRADERS_COUNT> {
-    pub fn new(
-        traders: [Arc<TradesLogger>; TRADERS_COUNT],
-        merchants: [Arc<dyn Merchant>; TRADERS_COUNT],
-    ) -> LimitMasterTestContext<TRADERS_COUNT> {
-        LimitMasterTestContext {
-            traders,
-            merchants,
-        }
+impl LimitMasterTestContext {
+    pub fn append(
+        &mut self,
+        trades: Vec<Trade>,
+        sniffer: Arc<dyn Sniffer>,
+        accountant: Arc<dyn Accountant>,
+    ) {
+        let trader = Arc::new(TradesLogger::with_orders(
+            TraderTest::default(),
+            trades));
+        self.traders.push(trader.clone());
+        self.merchants.push(Arc::new(MerchantTest::custom(
+            accountant,
+            sniffer,
+            trader)));
     }
 
-    pub fn traders_with_trade(
-        trades: [Trade; TRADERS_COUNT],
-    ) -> Self {
-        let traders = trades.map(|trade| Arc::new(TradesLogger::with_orders(
-                TraderTest::default(),
-                vec![trade])));
-        fn create_merchant(trader: &Arc<TradesLogger>) -> Arc<dyn Merchant> {
-            Arc::new(MerchantTest::with_trader(trader.clone()))
-        }
-        let merchants = traders.each_ref().map(create_merchant);
-        LimitMasterTestContext::new(
-            traders,
-            merchants
-        )
+    pub fn merchants(&self) -> Vec<&dyn Merchant> {
+        self.merchants.iter().map(AsRef::as_ref).collect()
     }
+}
 
-    pub fn merchants(&self) -> [&dyn Merchant; TRADERS_COUNT] {
-        self.merchants.each_ref().map(|item| item.as_ref())
+fn default_buy_trading_pair() -> TradingPair {
+    TradingPair {
+        coins: Coins::TonUsdt,
+        side: Side::Buy,
+        target: Target::Limit,
     }
+}
+
+fn create_limit_trade(trading_pair: TradingPair, id: u32) -> Trade {
+    Trade::Limit(OrderWithId {
+        id: id.to_string(),
+        trading_pair,
+        price: 1.00f64,
+        amount: 100f64,
+    })
 }
 
 #[test]
 fn default_limit_master() {
-    let trading_pair = TradingPair {
-        coins: Coins::TonUsdt,
-        side: Side::Buy,
-        target: Target::Limit,
-    };
-    let trade_buy = Trade::Limit(OrderWithId {
-        id: "1337".into(),
-        trading_pair: trading_pair.clone(),
-        price: 100f64,
-        amount: 100f64,
-    });
-    let test_context = LimitMasterTestContext::traders_with_trade(
-        [trade_buy.clone(), trade_buy.clone(), trade_buy.clone(), trade_buy.clone()]);
+    let trading_pair = default_buy_trading_pair();
+    let trade_buy = create_limit_trade(trading_pair, 1337);
+    let mut test_context = LimitMasterTestContext::default();
+    test_context.append(
+        vec![trade_buy.clone()],
+        Arc::new(SnifferTest::default()),
+        Arc::new(AccountantTest::default())
+    );
+    test_context.append(
+        vec![trade_buy.clone()],
+        Arc::new(SnifferTest::default()),
+        Arc::new(AccountantTest::default())
+    );
     let merchants = test_context.merchants();
     let merchants_manager = MerchantIdManager::new(&merchants);
     let price_calculator = PriceCalculator {
@@ -91,25 +100,49 @@ fn default_limit_master() {
     assert!(result.is_ok());
 
     for trader in test_context.traders.iter() {
-        assert_eq!(trader.create_order_log.lock().unwrap().len(), 3);
+        assert_eq!(trader.create_order_log.lock().unwrap().len(), 1);
     }
 }
 
 #[test]
-fn initialize_traders() {
-    let trading_pair = TradingPair {
-        coins: Coins::TonUsdt,
-        side: Side::Sell,
-        target: Target::Limit,
-    };
-    let trade_buy = Trade::Limit(OrderWithId {
-        id: "1337".into(),
-        trading_pair: trading_pair.clone(),
-        price: 100f64,
-        amount: 100f64,
-    });
-    let test_context = LimitMasterTestContext::traders_with_trade(
-        [trade_buy.clone(), trade_buy.clone(), trade_buy.clone(), trade_buy.clone()]);
+fn update_and_check() {
+    let trading_pair = default_buy_trading_pair();
+    let sniffer_builder = SnifferBuilder::new()
+        .my_orders(vec![TestOrderWithId {
+            id: 1337.to_string(),
+            price: 1.00f64,
+            amount: 100f64,
+        }]);
+    let amount = 100f64;
+    let mut test_context = LimitMasterTestContext::default(); 
+    test_context.append(
+        vec![
+            create_limit_trade(trading_pair.clone(), 1337),
+        ],
+        Arc::new(sniffer_builder.clone().build(amount)),
+        Arc::new(AccountantTest::default()));
+    let sniffer_builder = sniffer_builder.my_orders(vec![TestOrderWithId {
+            id: 1338.to_string(),
+            price: 1.00f64,
+            amount: 100f64,
+        }]);
+    test_context.append(
+        vec![
+            create_limit_trade(trading_pair.clone(), 1338),
+        ],
+        Arc::new(sniffer_builder.clone().build(amount)),
+        Arc::new(AccountantTest::default()));
+    let sniffer_builder = sniffer_builder.my_orders(vec![TestOrderWithId {
+            id: 1339.to_string(),
+            price: 1.00f64,
+            amount: 100f64,
+        }]);
+    test_context.append(
+        vec![
+            create_limit_trade(trading_pair.clone(), 1339),
+        ],
+        Arc::new(sniffer_builder.clone().build(amount)),
+        Arc::new(AccountantTest::default()));
     let merchants = test_context.merchants();
     let merchants_manager = MerchantIdManager::new(&merchants);
     let price_calculator = PriceCalculator {
@@ -128,9 +161,11 @@ fn initialize_traders() {
     let trades = limit_master.check_current_orders();
     let trades = tokio_test::block_on(trades);
     assert!(trades.is_ok());
+    assert_eq!(trades.unwrap().len(), 0);
+
     let result = limit_master.update_orders();
     let result = tokio_test::block_on(result);
-    assert!(result.is_ok());
+    assert!(result.is_ok(), "{:#?}", result);
 
     for trader in test_context.traders.iter() {
         assert_eq!(trader.create_order_log.lock().unwrap().len(), 3);

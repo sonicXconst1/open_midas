@@ -3,10 +3,12 @@
 //! There are two main stages: check current limit orders state & update current limit orders
 //! state.
 //!
-//! TODO: current tests do not change orders and we could not text the check method.
+//! TODO: Allow Limit Master to load last OrdersStorage. It will be requiered for deserialization.
+//! Now it is requiered for testing check method wihtout calling an update.
 use crate::calculators::amount_calculator::Balance;
 use crate::calculators::price_calculator::PriceCalculator;
 use crate::calculators::AmountCalculator;
+use crate::deleter::Deleter;
 use agnostic::merchant::Merchant;
 use agnostic::order::{Order, OrderWithId};
 use agnostic::trade::Trade;
@@ -247,23 +249,11 @@ impl<'a> LimitMaster<'a> {
         Ok(UpdateOrder::Updated)
     }
 
-    async fn delete_all_my_orders(&mut self) -> Result<(), String> {
-        for merchant in self.merchants_manager.iter() {
-            let sniffer = merchant.sniffer();
-            let trader = merchant.trader();
-            for side in &[Side::Sell, Side::Buy] {
-                let trading_pair = TradingPair {
-                    coins: self.coins.clone(),
-                    side: *side,
-                    target: Target::Limit,
-                };
-                let my_orders = sniffer.get_my_orders(trading_pair).await?;
-                for order in my_orders.iter() {
-                    trader.delete_order(order.id.as_ref()).await?;
-                }
-            }
-        }
-        Ok(())
+    pub async fn delete_all_my_orders(&self) -> Result<(), String> {
+        Deleter::default().delete_all(
+            self.merchants_manager.iter().as_slice(),
+            self.coins.clone(),
+        ).await
     }
 
     async fn accumulate_merchants_infomration(&self) -> OrdersStorage<Order> {
