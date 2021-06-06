@@ -168,7 +168,19 @@ fn update_and_check() {
     assert!(result.is_ok(), "{:#?}", result);
 
     for trader in test_context.traders.iter() {
-        assert_eq!(trader.create_order_log.lock().unwrap().len(), 3);
+        let created_orders = trader.create_order_log.lock().unwrap();
+        assert!(created_orders.iter().all(|order| order.is_ok()));
+        assert_eq!(created_orders.len(), 3);
+        let (buy_best_price, sell_best_price) = created_orders.iter()
+            .map(|order| order.as_ref().unwrap())
+            .fold((f64::MIN, f64::MAX), |mut acc, order| {
+                match order.trading_pair().side {
+                    Side::Buy => acc.0 = acc.0.max(order.price()),
+                    Side::Sell => acc.1 = acc.1.min(order.price()),
+                };
+                acc
+            });
+        assert!(buy_best_price < sell_best_price, "{} >= {}", buy_best_price, sell_best_price)
     }
 
     let trades = limit_master.check_current_orders();

@@ -208,8 +208,8 @@ impl<'a> LimitMaster<'a> {
             target: Target::Market,
         };
         let price_for_limit_order = match side {
-            Side::Buy => self.price_calculator.high(best_stock_order.order.price),
-            Side::Sell => self.price_calculator.low(best_stock_order.order.price),
+            Side::Buy => self.price_calculator.low(best_stock_order.order.price),
+            Side::Sell => self.price_calculator.high(best_stock_order.order.price),
         };
         for merchant in self.merchants_manager.iter() {
             let accountant = merchant.accountant();
