@@ -14,7 +14,7 @@ use agnostic::order::{Order, OrderWithId};
 use agnostic::trade::Trade;
 use agnostic::trading_pair::{Coins, Side, Target, TradingPair};
 
-pub type MerchantId = usize;
+pub type MerchantId = &'static str;
 
 #[derive(Clone, Debug)]
 pub struct OrderEntity<TOrder> {
@@ -58,13 +58,14 @@ impl<'a> MerchantIdManager<'a> {
     pub fn get_mercahnt_id(&self, merchant: &dyn Merchant) -> Option<MerchantId> {
         self.merchants
             .iter()
-            .enumerate()
-            .find(|(_index, m)| std::ptr::eq(**m, merchant))
-            .map(|(index, _merchant)| index)
+            .find(|m| std::ptr::eq(**m, merchant))
+            .map(|merchant| merchant.id())
     }
 
     pub fn get_merchant(&self, id: MerchantId) -> Option<&dyn Merchant> {
-        self.merchants.get(id).map(|value| *value)
+        self.merchants.iter()
+            .find(|merchant| merchant.id() == id)
+            .map(|m| *m)
     }
 
     pub fn iter(&self) -> std::slice::Iter<'_, &dyn Merchant> {

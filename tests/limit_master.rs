@@ -26,6 +26,7 @@ pub struct LimitMasterTestContext {
 impl LimitMasterTestContext {
     pub fn append(
         &mut self,
+        id: &'static str,
         trades: Vec<Trade>,
         sniffer: Arc<dyn Sniffer>,
         accountant: Arc<dyn Accountant>,
@@ -35,6 +36,7 @@ impl LimitMasterTestContext {
             trades));
         self.traders.push(trader.clone());
         self.merchants.push(Arc::new(MerchantTest::custom(
+            id,
             accountant,
             sniffer,
             trader)));
@@ -68,11 +70,13 @@ fn default_limit_master() {
     let trade_buy = create_limit_trade(trading_pair, 1337);
     let mut test_context = LimitMasterTestContext::default();
     test_context.append(
+        "first",
         vec![trade_buy.clone()],
         Arc::new(SnifferTest::default()),
         Arc::new(AccountantTest::default())
     );
     test_context.append(
+        "second",
         vec![trade_buy.clone()],
         Arc::new(SnifferTest::default()),
         Arc::new(AccountantTest::default())
@@ -116,6 +120,7 @@ fn update_and_check() {
     let amount = 100f64;
     let mut test_context = LimitMasterTestContext::default(); 
     test_context.append(
+        "first",
         vec![
             create_limit_trade(trading_pair.clone(), 1337),
         ],
@@ -127,6 +132,7 @@ fn update_and_check() {
             amount: 100f64,
         }]);
     test_context.append(
+        "second",
         vec![
             create_limit_trade(trading_pair.clone(), 1338),
         ],
@@ -138,6 +144,7 @@ fn update_and_check() {
             amount: 100f64,
         }]);
     test_context.append(
+        "third",
         vec![
             create_limit_trade(trading_pair.clone(), 1339),
         ],

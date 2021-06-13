@@ -5,5 +5,4 @@ pub mod reseller;
 pub mod reseller_saver;
 pub mod calculators;
 pub mod filters;
-pub mod merchant_manager;
 pub mod deleter;

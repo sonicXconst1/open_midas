@@ -23,6 +23,6 @@ fn reseller_no_data_iteration() {
     let merchants: Vec<&dyn merchant::Merchant> = vec![&merchant];
     let mut reseller = default_reseller(merchants);
     let result = block_on(reseller.iterate());
-    assert!(result.is_err())
+    assert_eq!(result, Ok(None))
 }
 

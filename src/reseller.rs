@@ -4,7 +4,7 @@ use crate::filters::LowAmountFilter;
 use agnostic::merchant::Merchant;
 use agnostic::order::Order;
 use agnostic::trade::Trade;
-use agnostic::trading_pair::{Coins, TradingPair};
+use agnostic::trading_pair::{Coin, Coins, TradingPair};
 use agnostic::trading_pair::{Side, Target};
 use std::collections::HashMap;
 
@@ -66,7 +66,7 @@ impl<'a> Reseller<'a> {
         accept_new_item(storage, &coins, price, amount)
     }
 
-    pub async fn iterate(&mut self) -> Result<Trade, String> {
+    pub async fn iterate(&mut self) -> Result<Option<Trade>, String> {
         let target = Target::Market;
         for side in &[Side::Sell, Side::Buy] {
             let (storage, entry_side) = match side {
@@ -84,14 +84,22 @@ impl<'a> Reseller<'a> {
                     target,
                     side: side.clone(),
                 };
-                let (the_best_order, merchant) = find_the_best_order(
+                let (the_best_order, merchant) = match find_the_best_order(
                     the_best_entry,
                     &self.merchants,
                     trading_pair,
                     &self.amount_calculator,
                     &self.low_amount_filter,
                 )
-                .await?;
+                .await {
+                    Ok(find_result) => find_result,
+                    Err(error) => match error {
+                        FindError::NoProfit => continue,
+                        other => {
+                            return Err(format!("Find error: {}", other));
+                        },
+                    },
+                };
                 let profit_calculator = ProfitCalculator::default();
                 let (sell_price, buy_price) = match side.clone() {
                     Side::Sell => (the_best_order.price, the_best_entry.price),
@@ -110,7 +118,7 @@ impl<'a> Reseller<'a> {
                                         entry.amount -= trade.amount()
                                     };
                                     self.accept_trade(trade.clone());
-                                    return Ok(trade);
+                                    return Ok(Some(trade));
                                 }
                                 Err(error) => return Err(format!(
                                     "Failed to create an order {:#?}\n\t Error!: {:#?}",
@@ -123,7 +131,7 @@ impl<'a> Reseller<'a> {
                 }
             }
         }
-        Err("No good orders to trade.".to_owned())
+        Ok(None)
     }
 }
 
@@ -157,35 +165,53 @@ fn find_best_entry(entries: &[Entry], side: Side) -> Option<(usize, &Entry)> {
     }
 }
 
+pub enum FindError {
+    NoProfit,
+    EmptyStock,
+    SnifferError(String),
+    AccountantError((Coin, String)),
+}
+
+impl std::fmt::Display for FindError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            FindError::NoProfit => write!(f, "No Profit"),
+            FindError::EmptyStock  => write!(f, "Empty Stock"),
+            FindError::SnifferError(error) => write!(f, "{}", error),
+            FindError::AccountantError((_coin, error)) => write!(f, "{}", error),
+        }
+    }
+}
+
 async fn find_the_best_order<'a>(
     entry: &Entry,
     merchants: &[&'a dyn Merchant],
     pair: TradingPair,
     amount_calculator: &AmountCalculator,
     low_amount_filter: &LowAmountFilter,
-) -> Result<(Order, &'a dyn Merchant), String> {
+) -> Result<(Order, &'a dyn Merchant), FindError> {
     let mut result = None;
     let mut the_best_merchant = None;
-    let mut result_error = String::new();
     for merchant in merchants.iter() {
         let sniffer = merchant.sniffer();
-        let orders = sniffer.all_the_best_orders(pair.clone(), 15).await?;
+        let orders = match sniffer.all_the_best_orders(pair.clone(), 15).await {
+            Ok(orders) => orders,
+            Err(error) => {
+                return Err(FindError::SnifferError(error));
+            },
+        };
         let orders = low_amount_filter.filter(orders);
         let the_best_order = match orders.get(0) {
             Some(order) => order,
             None => {
-                return Err(format!(
-                    "Sniffer failed to sniff orders.\nPair: {:#?}\nOrders: {:#?}",
-                    pair, orders
-                ))
+                return Err(FindError::EmptyStock);
             }
         };
         let accountant = merchant.accountant();
         let currency = match accountant.ask(pair.coin_to_spend()).await {
             Ok(currency) => currency,
             Err(error) => {
-                result_error.push_str(&error);
-                continue;
+                return Err(FindError::AccountantError((pair.coin_to_spend(), error)));
             }
         };
         let currency_to_spend = agnostic::price::convert_to_base_coin_amount(
@@ -230,6 +256,6 @@ async fn find_the_best_order<'a>(
     }
     match (result, the_best_merchant) {
         (Some(order), Some(merchant)) => Ok((order, *merchant)),
-        _ => Err(format!("Failed to find the best order: {}", result_error)),
+        _ => Err(FindError::NoProfit),
     }
 }
