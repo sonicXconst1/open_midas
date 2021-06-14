@@ -29,7 +29,7 @@ impl ResellerSaver {
         Ok(ResellerSaver { file })
     }
 
-    pub fn read_market_buy_and_sell_storages(
+    pub fn read_buy_and_sell_storages(
         &mut self,
     ) -> Result<(Storage, Storage), std::io::Error> {
         self.file.seek(SeekFrom::Start(0))?;
