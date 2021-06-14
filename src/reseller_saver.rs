@@ -12,8 +12,8 @@ pub struct ResellerSaver {
 impl ResellerSaver {
     pub fn save_storages(&mut self, reseller: &Reseller) -> Result<(), std::io::Error> {
         let storages = [
-            convert_storage(&reseller.market_buy_storage),
-            convert_storage(&reseller.market_sell_storage),
+            convert_storage(&reseller.buy_storage),
+            convert_storage(&reseller.sell_storage),
         ];
         self.file.seek(SeekFrom::Start(0))?;
         self.file.set_len(0)?;

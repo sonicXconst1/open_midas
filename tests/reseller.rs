@@ -1,4 +1,4 @@
-use open_midas::reseller::Reseller;
+use open_midas::reseller::{Reseller, Storage};
 use open_midas::calculators::AmountCalculator;
 use open_midas::filters::LowAmountFilter;
 use agnostic::merchant;
@@ -7,6 +7,8 @@ use tokio_test::block_on;
 
 fn default_reseller<'a>(merchants: Vec<&'a dyn merchant::Merchant>) -> Reseller<'a> {
     Reseller::new(
+        Storage::new(),
+        Storage::new(),
         merchants,
         LowAmountFilter { low_amount: 0.1 },
         AmountCalculator {

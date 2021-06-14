@@ -26,8 +26,8 @@ impl Entry {
 
 pub struct Reseller<'a> {
     merchants: Vec<&'a dyn Merchant>,
-    pub market_buy_storage: Storage,
-    pub market_sell_storage: Storage,
+    pub buy_storage: Storage,
+    pub sell_storage: Storage,
     low_amount_filter: LowAmountFilter,
     amount_calculator: AmountCalculator,
     min_profit: f64,
@@ -35,6 +35,8 @@ pub struct Reseller<'a> {
 
 impl<'a> Reseller<'a> {
     pub fn new(
+        buy_storage: Storage,
+        sell_storage: Storage,
         merchants: Vec<&'a dyn Merchant>,
         low_amount_filter: LowAmountFilter,
         amount_calculator: AmountCalculator,
@@ -44,8 +46,8 @@ impl<'a> Reseller<'a> {
             merchants,
             low_amount_filter,
             amount_calculator,
-            market_buy_storage: Storage::new(),
-            market_sell_storage: Storage::new(),
+            buy_storage,
+            sell_storage,
             min_profit,
         }
     }
@@ -54,14 +56,9 @@ impl<'a> Reseller<'a> {
         let coins = trade.trading_pair().coins;
         let price = trade.price();
         let amount = trade.amount();
-        let storage: &mut Storage = match trade {
-            Trade::Market(trade_result) => match trade_result.trading_pair.side {
-                Side::Sell => &mut self.market_sell_storage,
-                Side::Buy => &mut self.market_buy_storage,
-            },
-            Trade::Limit(_order_with_id) => {
-                unimplemented!("Limit orders are not supported.")
-            }
+        let storage: &mut Storage = match trade.trading_pair().side {
+            Side::Sell => &mut self.sell_storage,
+            Side::Buy => &mut self.buy_storage,
         };
         accept_new_item(storage, &coins, price, amount)
     }
@@ -70,8 +67,8 @@ impl<'a> Reseller<'a> {
         let target = Target::Market;
         for side in &[Side::Sell, Side::Buy] {
             let (storage, entry_side) = match side {
-                Side::Sell => (&mut self.market_buy_storage, Side::Buy),
-                Side::Buy => (&mut self.market_sell_storage, Side::Sell),
+                Side::Sell => (&mut self.buy_storage, Side::Buy),
+                Side::Buy => (&mut self.sell_storage, Side::Sell),
             };
             for (coins, entries) in storage.iter_mut() {
                 let (entry_index, the_best_entry) =
