@@ -224,10 +224,12 @@ impl<'a> LimitMaster<'a> {
                 amount: balance.amount,
                 fee: self.amount_calculator.fee,
             };
-            let limit_order_amount = self
+            let limit_order_amount = match self
                 .amount_calculator
-                .evaluate(best_stock_order.order.amount, &balance)
-                .unwrap();
+                .evaluate(best_stock_order.order.amount, &balance) {
+                Some(result) => result,
+                None => return Ok(Vec::new()),
+            };
             let trader = merchant.trader();
             match trader
                 .create_order(Order {
