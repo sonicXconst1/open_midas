@@ -203,10 +203,14 @@ impl<'a> LimitMaster<'a> {
             .iter()
             .filter(|entity| entity.order.amount > min_amount)
             .collect();
-        let best_stock_order = match market_stock.get(0) {
-            Some(order) => order,
-            None => return Ok(Vec::new()),
+        let best_stock_order = match side {
+            Side::Buy => market_stock.iter().min_by(|left, right| left.order.price.partial_cmp(&right.order.price).unwrap()),
+            Side::Sell => market_stock.iter().max_by(|left, right| left.order.price.partial_cmp(&right.order.price).unwrap()),
         };
+        if best_stock_order.is_none() {
+            return Ok(Vec::new());
+        }
+        let best_stock_order = best_stock_order.unwrap();
         let market_trading_pair = TradingPair {
             coins,
             side,
