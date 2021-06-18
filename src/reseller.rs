@@ -154,11 +154,11 @@ fn find_best_entry(entries: &[Entry], side: Side) -> Option<(usize, &Entry)> {
         Side::Sell => entries
             .iter()
             .enumerate()
-            .max_by(|left, right| left.1.price.partial_cmp(&right.1.price).unwrap()),
+            .min_by(|left, right| left.1.price.partial_cmp(&right.1.price).unwrap()),
         Side::Buy => entries
             .iter()
             .enumerate()
-            .min_by(|left, right| left.1.price.partial_cmp(&right.1.price).unwrap()),
+            .max_by(|left, right| left.1.price.partial_cmp(&right.1.price).unwrap()),
     }
 }
 

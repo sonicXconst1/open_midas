@@ -22,6 +22,16 @@ pub struct OrderEntity<TOrder> {
     pub order: TOrder,
 }
 
+pub fn entity_to_string(entity: OrderEntity<OrderWithId>) -> String {
+    format!(
+        "{:^8} {:^6} {:^8} Price {:^11.5} Amount {:<11.5}",
+        entity.merchant_id,
+        entity.order.trading_pair.side,
+        entity.order.trading_pair.target,
+        entity.order.price,
+        entity.order.amount)
+}
+
 impl<TOrder> OrderEntity<TOrder> {
     pub fn new(merchant_id: MerchantId, order: TOrder) -> Self {
         OrderEntity { merchant_id, order }
@@ -73,16 +83,10 @@ impl<'a> MerchantIdManager<'a> {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub struct Update {
-    sell: UpdateOrder,
-    buy: UpdateOrder,
-}
-
-#[derive(Clone, Copy, Debug)]
-pub enum UpdateOrder {
-    Updated,
-    NoOrdersToUpdate,
+    sell: Vec<OrderEntity<OrderWithId>>,
+    buy: Vec<OrderEntity<OrderWithId>>,
 }
 
 pub struct LimitMaster<'a> {
@@ -191,7 +195,7 @@ impl<'a> LimitMaster<'a> {
         &mut self,
         side: Side,
         current_orders_storage: &OrdersStorage<Order>,
-    ) -> Result<UpdateOrder, String> {
+    ) -> Result<Vec<OrderEntity<OrderWithId>>, String> {
         let coins = self.coins.clone();
         let min_amount = self.amount_calculator.min_amount_threshold;
         let market_stock: Vec<_> = current_orders_storage
@@ -201,7 +205,7 @@ impl<'a> LimitMaster<'a> {
             .collect();
         let best_stock_order = match market_stock.get(0) {
             Some(order) => order,
-            None => return Ok(UpdateOrder::NoOrdersToUpdate),
+            None => return Ok(Vec::new()),
         };
         let market_trading_pair = TradingPair {
             coins,
@@ -212,6 +216,7 @@ impl<'a> LimitMaster<'a> {
             Side::Buy => self.price_calculator.low(best_stock_order.order.price),
             Side::Sell => self.price_calculator.high(best_stock_order.order.price),
         };
+        let mut orders = Vec::with_capacity(10);
         for merchant in self.merchants_manager.iter() {
             let accountant = merchant.accountant();
             let balance = accountant.ask(market_trading_pair.coin_to_spend()).await?;
@@ -242,12 +247,14 @@ impl<'a> LimitMaster<'a> {
                         Side::Buy => &mut self.my_orders_last_state.sell_stock,
                         Side::Sell => &mut self.my_orders_last_state.buy_stock,
                     };
-                    stock.push(OrderEntity { merchant_id, order });
+                    let entity = OrderEntity { merchant_id, order };
+                    orders.push(entity.clone());
+                    stock.push(entity)
                 }
                 _ => panic!("Failed to create order"),
             };
         }
-        Ok(UpdateOrder::Updated)
+        Ok(orders)
     }
 
     pub async fn delete_all_my_orders(&self) -> Result<(), String> {
