@@ -225,6 +225,7 @@ impl<'a> LimitMaster<'a> {
                 fee: self.amount_calculator.fee,
             };
             println!("{:#?}", balance);
+            println!("{:#?}", best_stock_order);
             let limit_order_amount = match self
                 .amount_calculator
                 .evaluate(best_stock_order.order.amount, &balance) {
