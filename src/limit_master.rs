@@ -24,7 +24,7 @@ pub struct OrderEntity<TOrder> {
 
 pub fn entity_to_string(entity: OrderEntity<OrderWithId>) -> String {
     format!(
-        "{:8} {:10} {:8} Price {:^11.5} Amount {:<11.5}",
+        "{:^8} {:^10} {:^8} price {:^11.5} amount {:<11.5}",
         entity.merchant_id,
         entity.order.trading_pair.side,
         entity.order.trading_pair.target,
