@@ -228,7 +228,7 @@ impl<'a> LimitMaster<'a> {
                 .amount_calculator
                 .evaluate(best_stock_order.order.amount, &balance) {
                 Some(result) => result,
-                None => return Ok(Vec::new()),
+                None => return Ok(orders),
             };
             let trader = merchant.trader();
             match trader
