@@ -85,8 +85,8 @@ impl<'a> MerchantIdManager<'a> {
 
 #[derive(Clone, Debug)]
 pub struct Update {
-    sell: Vec<OrderEntity<OrderWithId>>,
-    buy: Vec<OrderEntity<OrderWithId>>,
+    pub sell: Vec<OrderEntity<OrderWithId>>,
+    pub buy: Vec<OrderEntity<OrderWithId>>,
 }
 
 pub struct LimitMaster<'a> {
