@@ -31,7 +31,7 @@ pub struct Reseller<'a> {
     low_amount_filter: LowAmountFilter,
     amount_calculator: AmountCalculator,
     min_profit: f64,
-    auto_accept: bool
+    auto_accept: bool,
 }
 
 impl<'a> Reseller<'a> {
@@ -73,11 +73,17 @@ impl<'a> Reseller<'a> {
                 Side::Sell => (&mut self.buy_storage, Side::Buy),
                 Side::Buy => (&mut self.sell_storage, Side::Sell),
             };
+            log::debug!("Storage {} with {} entries", entry_side, storage.len());
             for (coins, entries) in storage.iter_mut() {
-                let (entry_index, the_best_entry) = match find_best_entry(&entries, entry_side) {
-                    Some(entry) => entry,
-                    None => continue,
-                };
+                let (entry_index, the_best_entry) =
+                    match find_best_entry(&entries, entry_side) {
+                        Some(entry) => entry,
+                        None => continue,
+                    };
+                log::debug!(
+                    "Best entry: Price {:<8.3} Amount {:^8.3}", 
+                    the_best_entry.price,
+                    the_best_entry.amount);
                 let trading_pair = TradingPair {
                     coins: coins.clone(),
                     target,
@@ -100,6 +106,11 @@ impl<'a> Reseller<'a> {
                         }
                     },
                 };
+                log::debug!(
+                    "The best order: Side {:<8} Price {:^10.3} Amount {}",
+                    the_best_order.trading_pair.side,
+                    the_best_order.price,
+                    the_best_order.amount);
                 let profit_calculator = ProfitCalculator::default();
                 let (sell_price, buy_price) = match iteration_side.clone() {
                     Side::Sell => (the_best_order.price, the_best_entry.price),
@@ -122,12 +133,10 @@ impl<'a> Reseller<'a> {
                                     }
                                     return Ok(Some(trade));
                                 }
-                                Err(error) => {
-                                    return Err(format!(
-                                        "Failed to create an order {:#?}\n\t Error!: {:#?}",
-                                        the_best_order, error
-                                    ))
-                                }
+                                Err(error) => return Err(format!(
+                                    "Failed to create an order {:#?}\n\t Error!: {:#?}",
+                                    the_best_order, error
+                                )),
                             }
                         }
                     }
@@ -139,7 +148,12 @@ impl<'a> Reseller<'a> {
     }
 }
 
-fn accept_new_item(storage: &mut Storage, coins: &Coins, new_price: Price, new_amount: Amount) {
+fn accept_new_item(
+    storage: &mut Storage,
+    coins: &Coins,
+    new_price: Price,
+    new_amount: Amount,
+) {
     let entries = match storage.get_mut(coins) {
         Some(entries) => entries,
         None => {
@@ -228,11 +242,12 @@ async fn find_the_best_order<'a>(
             amount: currency_to_spend,
             fee: amount_calculator.fee,
         };
-        let amount =
-            match amount_calculator.evaluate(the_best_order.amount.min(entry.amount), &balance) {
-                Some(amount) => amount.value(),
-                None => continue,
-            };
+        let amount = match amount_calculator
+            .evaluate(the_best_order.amount.min(entry.amount), &balance)
+        {
+            Some(amount) => amount.value(),
+            None => continue,
+        };
         match (pair.side.clone(), &mut result) {
             (_, None) => {
                 result = Some(Order {
