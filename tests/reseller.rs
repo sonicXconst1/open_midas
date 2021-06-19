@@ -16,6 +16,7 @@ fn default_reseller<'a>(merchants: Vec<&'a dyn merchant::Merchant>) -> Reseller<
             fee: 0.01,
         },
         0.1,
+        true,
     )
 }
 
@@ -28,3 +29,6 @@ fn reseller_no_data_iteration() {
     assert_eq!(result, Ok(None))
 }
 
+#[test]
+fn reseller_with_good_orders() {
+}

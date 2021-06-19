@@ -31,6 +31,7 @@ pub struct Reseller<'a> {
     low_amount_filter: LowAmountFilter,
     amount_calculator: AmountCalculator,
     min_profit: f64,
+    auto_accept: bool
 }
 
 impl<'a> Reseller<'a> {
@@ -41,6 +42,7 @@ impl<'a> Reseller<'a> {
         low_amount_filter: LowAmountFilter,
         amount_calculator: AmountCalculator,
         min_profit: f64,
+        auto_accept: bool,
     ) -> Reseller<'a> {
         Reseller {
             merchants,
@@ -49,6 +51,7 @@ impl<'a> Reseller<'a> {
             buy_storage,
             sell_storage,
             min_profit,
+            auto_accept,
         }
     }
 
@@ -65,21 +68,20 @@ impl<'a> Reseller<'a> {
 
     pub async fn iterate(&mut self) -> Result<Option<Trade>, String> {
         let target = Target::Market;
-        for side in &[Side::Sell, Side::Buy] {
-            let (storage, entry_side) = match side {
+        for iteration_side in &[Side::Sell, Side::Buy] {
+            let (storage, entry_side) = match iteration_side {
                 Side::Sell => (&mut self.buy_storage, Side::Buy),
                 Side::Buy => (&mut self.sell_storage, Side::Sell),
             };
             for (coins, entries) in storage.iter_mut() {
-                let (entry_index, the_best_entry) =
-                    match find_best_entry(&entries, entry_side) {
-                        Some(entry) => entry,
-                        None => continue,
-                    };
+                let (entry_index, the_best_entry) = match find_best_entry(&entries, entry_side) {
+                    Some(entry) => entry,
+                    None => continue,
+                };
                 let trading_pair = TradingPair {
                     coins: coins.clone(),
                     target,
-                    side: side.clone(),
+                    side: iteration_side.clone(),
                 };
                 let (the_best_order, merchant) = match find_the_best_order(
                     the_best_entry,
@@ -88,17 +90,18 @@ impl<'a> Reseller<'a> {
                     &self.amount_calculator,
                     &self.low_amount_filter,
                 )
-                .await {
+                .await
+                {
                     Ok(find_result) => find_result,
                     Err(error) => match error {
                         FindError::NoProfit => continue,
                         other => {
                             return Err(format!("Find error: {}", other));
-                        },
+                        }
                     },
                 };
                 let profit_calculator = ProfitCalculator::default();
-                let (sell_price, buy_price) = match side.clone() {
+                let (sell_price, buy_price) = match iteration_side.clone() {
                     Side::Sell => (the_best_order.price, the_best_entry.price),
                     Side::Buy => (the_best_entry.price, the_best_order.price),
                 };
@@ -114,13 +117,17 @@ impl<'a> Reseller<'a> {
                                         let entry = entries.get_mut(entry_index).unwrap();
                                         entry.amount -= trade.amount()
                                     };
-                                    self.accept_trade(trade.clone());
+                                    if self.auto_accept {
+                                        self.accept_trade(trade.clone());
+                                    }
                                     return Ok(Some(trade));
                                 }
-                                Err(error) => return Err(format!(
-                                    "Failed to create an order {:#?}\n\t Error!: {:#?}",
-                                    the_best_order,
-                                    error)),
+                                Err(error) => {
+                                    return Err(format!(
+                                        "Failed to create an order {:#?}\n\t Error!: {:#?}",
+                                        the_best_order, error
+                                    ))
+                                }
                             }
                         }
                     }
@@ -173,7 +180,7 @@ impl std::fmt::Display for FindError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             FindError::NoProfit => write!(f, "No Profit"),
-            FindError::EmptyStock  => write!(f, "Empty Stock"),
+            FindError::EmptyStock => write!(f, "Empty Stock"),
             FindError::SnifferError(error) => write!(f, "{}", error),
             FindError::AccountantError((_coin, error)) => write!(f, "{}", error),
         }
@@ -195,7 +202,7 @@ async fn find_the_best_order<'a>(
             Ok(orders) => orders,
             Err(error) => {
                 return Err(FindError::SnifferError(error));
-            },
+            }
         };
         let orders = low_amount_filter.filter(orders);
         let the_best_order = match orders.get(0) {
