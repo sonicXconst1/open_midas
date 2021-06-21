@@ -57,10 +57,17 @@ fn reseller_with_good_orders() {
         price: 0.49,
         amount: 10f64,
     }));
+    println!("{:#?}", reseller.buy_storage);
+    println!("{:#?}", reseller.sell_storage);
+    let _result = block_on(reseller.iterate());
     let result = block_on(reseller.iterate());
     assert!(result.is_ok());
     let result = result.unwrap();
     assert!(result.is_some());
     let result = result.unwrap();
-    assert_eq!(result.price(), 0.0)
+    println!("{:#?}", reseller.buy_storage);
+    println!("{:#?}", reseller.sell_storage);
+    assert_eq!(result.price(), 0.5);
+    let result = block_on(reseller.iterate());
+    assert_eq!(result, Ok(None));
 }
