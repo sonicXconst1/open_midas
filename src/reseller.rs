@@ -3,7 +3,7 @@ use crate::calculators::{AmountCalculator, ProfitCalculator};
 use crate::filters::LowAmountFilter;
 use agnostic::merchant::Merchant;
 use agnostic::order::Order;
-use agnostic::trade::Trade;
+use agnostic::trade::{Trade, TradeResult};
 use agnostic::trading_pair::{Coin, Coins, TradingPair};
 use agnostic::trading_pair::{Side, Target};
 use std::collections::HashMap;
@@ -122,14 +122,20 @@ impl<'a> Reseller<'a> {
                             let trader = merchant.trader();
                             match trader.create_order(the_best_order.clone()).await {
                                 Ok(trade) => {
-                                    if the_best_entry.amount - trade.amount() <= 0.0 {
+                                    let trade_amount = the_best_order.amount;
+                                    if the_best_entry.amount - trade_amount <= 0.0 {
                                         entries.remove(entry_index);
                                     } else {
                                         let entry = entries.get_mut(entry_index).unwrap();
-                                        entry.amount -= trade.amount()
+                                        entry.amount -= trade_amount
                                     };
                                     if self.auto_accept {
-                                        self.accept_trade(trade.clone());
+                                        self.accept_trade(Trade::Market(TradeResult {
+                                            id: trade.id(),
+                                            trading_pair: trade.trading_pair(),
+                                            price: the_best_order.price,
+                                            amount: trade_amount
+                                        }))
                                     }
                                     return Ok(Some(trade));
                                 }
