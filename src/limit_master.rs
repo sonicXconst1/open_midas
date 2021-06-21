@@ -124,6 +124,7 @@ impl<'a> LimitMaster<'a> {
 
     pub async fn check_current_orders(&mut self) -> Result<Vec<Trade>, String> {
         let my_current_orders = self.accumulate_my_current_order().await;
+        log::info!("{:#?}", my_current_orders);
         let performed_trades = self.my_orders_last_state.buy_stock.iter_mut().fold(
             Vec::with_capacity(16),
             |mut acc, last_order| {
