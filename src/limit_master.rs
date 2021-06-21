@@ -54,6 +54,11 @@ impl<TOrder> OrdersStorage<TOrder> {
             (Target::Market, Side::Sell) => &self.buy_stock[..],
         }
     }
+
+    pub fn clear(&mut self) {
+        self.sell_stock.clear();
+        self.buy_stock.clear();
+    }
 }
 
 pub struct MerchantIdManager<'a> {
@@ -264,7 +269,8 @@ impl<'a> LimitMaster<'a> {
         Ok(orders)
     }
 
-    pub async fn delete_all_my_orders(&self) -> Result<(), String> {
+    pub async fn delete_all_my_orders(&mut self) -> Result<(), String> {
+        self.my_orders_last_state.clear();
         Deleter::default().delete_all(
             self.merchants_manager.iter().as_slice(),
             self.coins.clone(),
