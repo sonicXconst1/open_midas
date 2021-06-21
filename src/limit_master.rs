@@ -240,17 +240,16 @@ impl<'a> LimitMaster<'a> {
                 None => return Ok(orders),
             };
             let trader = merchant.trader();
-            match trader
-                .create_order(Order {
-                    trading_pair: TradingPair {
-                        coins,
-                        side,
-                        target: Target::Limit,
-                    },
-                    price: price_for_limit_order,
-                    amount: limit_order_amount.value(),
-                })
-                .await
+            let limit_order = Order {
+                trading_pair: TradingPair {
+                    coins,
+                    side,
+                    target: Target::Limit,
+                },
+                price: price_for_limit_order,
+                amount: limit_order_amount.value(),
+            };
+            match trader.create_order(limit_order.clone()).await
             {
                 Ok(Trade::Limit(order)) => {
                     let merchant_id = self.merchants_manager.get_mercahnt_id(*merchant).unwrap();
@@ -258,7 +257,15 @@ impl<'a> LimitMaster<'a> {
                         Side::Buy => &mut self.my_orders_last_state.sell_stock,
                         Side::Sell => &mut self.my_orders_last_state.buy_stock,
                     };
-                    let entity = OrderEntity { merchant_id, order };
+                    let entity = OrderEntity { 
+                        merchant_id, 
+                        order: OrderWithId {
+                            id: order.id,
+                            trading_pair: order.trading_pair,
+                            price: limit_order.price,
+                            amount: limit_order.amount,
+                        }
+                    };
                     orders.push(entity.clone());
                     stock.push(entity)
                 }
