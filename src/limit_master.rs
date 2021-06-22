@@ -136,7 +136,10 @@ impl<'a> LimitMaster<'a> {
                             && item.order.id == last_order.order.id
                     })
                     .map_or_else(
-                        || Some(Trade::Limit(last_order.order.clone())),
+                        || {
+                            log::debug!("Order with id {} not found ({})", last_order.order.id, last_order.merchant_id);
+                            Some(Trade::Limit(last_order.order.clone()))
+                        },
                         |current_order| {
                             if current_order.order.amount < last_order.order.amount {
                                 let mut performed_order = last_order.order.clone();
